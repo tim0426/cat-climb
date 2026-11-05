@@ -1,14 +1,15 @@
 /**
  * NinJump DX — Cat Climb (local playable)
  * 貓喺兩邊牆向上爬；空白鍵／點擊跳去對面（有弧度）。
- * 小飛龍由上飛落；炮台射炮彈。本地試玩，唔 push GitHub。
+ * 小飛龍由上飛落；炮台射炮彈。GitHub Pages: tim0426/ninjump-dx-pixel
  *
  * Approved demo decisions:
- * 1) Wall-run: left FLIP+ROTATE_270 / right ROTATE_90 sprites; flush to wall
+ * 1) Wall-run: upright→scale(h=jump)→ROTATE_270→FLIP_TOP_BOTTOM (L);
+ *    right = mirror(L). Feet on wall, head→gap; belly TOP / back BOTTOM.
  * 2) Camera: walls & bg scroll DOWN → climb-up illusion
  * 3) Pointed triangular spikes
- * 4) Polished shield aura + bubble
- * 5) Every 3 slash HITS → climb boost + cyan afterimages
+ * 4) Shield: 8-frame aura + bubble + hit_flash (demo/shield_pack)
+ * 5) Every 3 slash HITS → climb boost + cyan trailing afterimages
  */
 
 const VW = 180;
@@ -524,8 +525,8 @@ class Player {
       }
     }
 
-    // record trail while boosting (for afterimages)
-    if (this.boostTimer > 0 && frameCount % 2 === 0) {
+    // record trail while boosting (for dash afterimages / 殘影)
+    if (this.boostTimer > 0) {
       this.trail.push({
         x: this.x,
         y: this.y,
@@ -535,8 +536,8 @@ class Player {
         slashFrame: this.slashFrame,
         air: this.side === 'air'
       });
-      if (this.trail.length > 6) this.trail.shift();
-    } else if (this.boostTimer <= 0) {
+      if (this.trail.length > 10) this.trail.shift();
+    } else {
       this.trail = [];
     }
   }
@@ -573,16 +574,22 @@ class Player {
 
   drawAfterimages() {
     if (this.trail.length < 2) return;
-    // draw oldest first; 2–3 translucent cyan-tinted copies
-    const samples = this.trail.slice(0, -1).slice(-3);
-    for (let i = 0; i < samples.length; i++) {
-      const s = samples[i];
+    // demo/dash_afterimage: 2–3 translucent cyan trailing clones behind climb
+    const idxs = [];
+    const n = this.trail.length;
+    // pick spaced samples (skip newest = current pose)
+    if (n >= 8) idxs.push(n - 8, n - 5, n - 3);
+    else if (n >= 5) idxs.push(0, floor(n / 2), n - 2);
+    else idxs.push(0, n - 2);
+    for (let i = 0; i < idxs.length; i++) {
+      const s = this.trail[idxs[i]];
+      if (!s) continue;
       const name = this.spriteName(s.side, s.jumpFrom, s.anim, s.slashFrame, s.air, false);
       const sp = sprites[name] || sprites.cat_wall_run_01;
       if (!sp) continue;
-      const alpha = map(i, 0, samples.length - 1, 60, 140);
+      const alpha = map(i, 0, idxs.length - 1, 45, 150);
       push();
-      tint(80, 255, 255, alpha);
+      tint(60, 230, 255, alpha);
       this.drawSpriteAt(sp, s.x, s.y, s.side, s.air);
       pop();
       noTint();
@@ -591,34 +598,36 @@ class Player {
 
   drawShieldFX() {
     if (!this.hasShield || this.dead) return;
-    const cx = this.side === 'left' ? GAP_L + 12
-      : this.side === 'right' ? GAP_R - 12
+    // center on body: wall-run sprites are flush; offset into gap
+    const cx = this.side === 'left' ? GAP_L + 14
+      : this.side === 'right' ? GAP_R - 14
       : this.x;
     const cy = this.y;
+    // demo/shield_pack aura_01..08 loop + bubble (+ hit_flash on break)
     const ai = 1 + (floor(frameCount / 3) % 8);
     const aura = sprites[`shield_aura_0${ai}`];
     imageMode(CENTER);
     if (aura) {
       push();
       translate(cx, cy);
-      // gentle rotate via frame cycling already; add slight scale pulse
-      const pulse = 1 + sin(frameCount * 0.15) * 0.06;
-      image(aura, 0, 0, 32 * pulse, 32 * pulse);
+      const pulse = 1 + sin(frameCount * 0.15) * 0.08;
+      image(aura, 0, 0, 36 * pulse, 36 * pulse);
       pop();
     }
     const bubble = sprites.shield_bubble;
     if (bubble) {
       push();
       translate(cx, cy);
-      rotate(frameCount * 0.04);
-      image(bubble, 0, 0, 30, 30);
+      rotate(frameCount * 0.05);
+      const bp = 1 + sin(frameCount * 0.12 + 1) * 0.05;
+      image(bubble, 0, 0, 28 * bp, 28 * bp);
       pop();
     }
     if (hitFlashTimer > 0 && sprites.shield_hit_flash) {
       const a = map(hitFlashTimer, 0, 12, 0, 255);
       push();
       tint(255, 255, 255, a);
-      image(sprites.shield_hit_flash, cx, cy, 36, 36);
+      image(sprites.shield_hit_flash, cx, cy, 40, 40);
       pop();
       noTint();
     }
@@ -642,11 +651,16 @@ class Player {
     }
 
     if (this.boostTimer > 0) {
-      noFill();
-      stroke(80, 255, 255, 160);
+      // subtle upward streak lines (殘影 companion)
       strokeWeight(1);
-      const bx = this.side === 'left' ? GAP_L + 2 : this.side === 'right' ? GAP_R - 22 : this.x - 10;
-      rect(bx, this.y - 14, 20, 26);
+      const cx = this.side === 'left' ? GAP_L + 10
+        : this.side === 'right' ? GAP_R - 10
+        : this.x;
+      for (let i = 0; i < 3; i++) {
+        stroke(80, 255, 255, 90 - i * 25);
+        const ox = (i - 1) * 3;
+        line(cx + ox, this.y + 6 + i * 3, cx + ox, this.y + 16 + i * 4);
+      }
       noStroke();
     }
   }
