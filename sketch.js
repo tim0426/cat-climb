@@ -463,7 +463,7 @@ function drawDead() {
 function flash(msg, t) { flashMsg = msg; flashTimer = t; }
 
 /* ========== GEM teleport — scene-wide dash feel ========== */
-const GEM_WARP_DUR = 28; // frames of full-screen warp
+const GEM_WARP_DUR = 36; // frames of full-screen warp (obvious)
 
 function startGemWarp(distance) {
   gemWarpTimer = GEM_WARP_DUR;
@@ -471,23 +471,23 @@ function startGemWarp(distance) {
   gemGhosts = [];
   // seed screen-space vertical speed streaks (gap only)
   gemStreaks = [];
-  for (let i = 0; i < 28; i++) {
+  for (let i = 0; i < 42; i++) {
     gemStreaks.push({
-      x: GAP_L + 4 + random(VW - WALL * 2 - 8),
+      x: 2 + random(VW - 4),
       y: random(-40, VH),
-      len: random(28, 95),
-      thick: random() < 0.65 ? 1 : 2,
-      speed: random(10, 22),
+      len: random(36, 110),
+      thick: random() < 0.5 ? 2 : 3,
+      speed: random(12, 26),
       bright: random()
     });
   }
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 10; i++) {
     gemStreaks.push({
-      x: GAP_L + 10 + random(VW - WALL * 2 - 20),
+      x: 4 + random(VW - 8),
       y: random(-80, VH),
-      len: random(110, 160),
-      thick: 1,
-      speed: random(16, 28),
+      len: random(120, 180),
+      thick: 2,
+      speed: random(18, 32),
       bright: 0.95
     });
   }
@@ -511,7 +511,7 @@ function updateGemWarp() {
   if (player && !player.dead && player.gemWarpDist) {
     player.y = player.gemWarpFromY - player.gemWarpDist * eased;
     // sample afterimages densely during peak warp
-    if (t > 0.08 && t < 0.92 && frameCount % 2 === 0) {
+    if (t > 0.05 && t < 0.95) {
       gemGhosts.push({
         x: player.x + random(-3, 3),
         y: player.y,
@@ -523,7 +523,7 @@ function updateGemWarp() {
         spinFrame: player.spinFrame || 0,
         life: 18
       });
-      if (gemGhosts.length > 14) gemGhosts.shift();
+      if (gemGhosts.length > 18) gemGhosts.shift();
     }
   }
   // advance streaks downward (climb-up illusion)
@@ -531,7 +531,7 @@ function updateGemWarp() {
     s.y += s.speed;
     if (s.y > VH + 20) {
       s.y = -s.len - random(10);
-      s.x = GAP_L + 4 + random(VW - WALL * 2 - 8);
+      s.x = 2 + random(VW - 4);
     }
   }
   for (let i = gemGhosts.length - 1; i >= 0; i--) {
@@ -551,24 +551,27 @@ function drawGemWarpScreenFX() {
   const peak = gemWarpTimer > 0
     ? sin(constrain(gemWarpPhase, 0, 1) * PI) // envelope
     : 0;
-  const tintA = gemWarpTimer > 0 ? 35 + peak * 55 : 0;
+  const tintA = gemWarpTimer > 0 ? 70 + peak * 110 : 0;
 
-  // cyan wash over playfield
+  // OBVIOUS full-screen cyan wash (whole viewport)
   if (tintA > 0) {
     noStroke();
-    fill(35, 150, 220, tintA);
+    fill(20, 180, 255, tintA);
+    rect(0, 0, VW, VH);
+    // brighter center band
+    fill(80, 240, 255, tintA * 0.45);
     rect(WALL, 0, VW - WALL * 2, VH);
-    // soft cyan edge bars (viewport glow)
-    const edgeA = 40 + peak * 90;
-    fill(60, 230, 255, edgeA * 0.55);
-    rect(0, 0, 3, VH);
-    rect(VW - 3, 0, 3, VH);
-    rect(0, 0, VW, 2);
-    rect(0, VH - 2, VW, 2);
+    // hard cyan edge bars (viewport glow)
+    const edgeA = 90 + peak * 140;
+    fill(100, 255, 255, edgeA * 0.7);
+    rect(0, 0, 5, VH);
+    rect(VW - 5, 0, 5, VH);
+    rect(0, 0, VW, 4);
+    rect(0, VH - 4, VW, 4);
     // inner gap outline pulses
     noFill();
-    stroke(120, 230, 255, 30 + peak * 70);
-    strokeWeight(1);
+    stroke(180, 255, 255, 60 + peak * 120);
+    strokeWeight(2);
     rect(WALL + 1, 1, VW - WALL * 2 - 2, VH - 2);
     noStroke();
   }
@@ -576,15 +579,15 @@ function drawGemWarpScreenFX() {
   // vertical speed streaks across the gap
   if (gemWarpTimer > 0) {
     for (let s of gemStreaks) {
-      let a, col;
-      if (s.bright > 0.78) { a = 180 + peak * 60; fill(160, 250, 255, a); }
-      else if (s.bright > 0.4) { a = 120 + peak * 50; fill(60, 230, 255, a); }
-      else { a = 80 + peak * 40; fill(30, 120, 180, a); }
+      let a;
+      if (s.bright > 0.78) { a = 220 + peak * 35; fill(200, 255, 255, a); }
+      else if (s.bright > 0.4) { a = 170 + peak * 50; fill(80, 240, 255, a); }
+      else { a = 120 + peak * 50; fill(40, 160, 220, a); }
       rect(s.x, s.y, s.thick, s.len);
       // short spark dashes
-      if (s.bright > 0.85 && (frameCount + int(s.x)) % 5 === 0) {
-        fill(255, 255, 255, 140 + peak * 60);
-        rect(s.x - 1, s.y + s.len * 0.3, 4, 1);
+      if (s.bright > 0.7 && (frameCount + int(s.x)) % 3 === 0) {
+        fill(255, 255, 255, 180 + peak * 60);
+        rect(s.x - 1, s.y + s.len * 0.3, 5, 2);
       }
     }
   }
@@ -840,8 +843,8 @@ class Player {
       noStroke();
       for (let i = 0; i < this.slashTrail.length; i++) {
         const p = this.slashTrail[i];
-        fill(60, 230, 255, map(p.life, 0, 12, 20, 160));
-        ellipse(p.x, p.y, 3, 3);
+        fill(60, 230, 255, map(p.life, 0, 12, 40, 220));
+        ellipse(p.x, p.y, 5, 5);
       }
     }
 
@@ -904,7 +907,7 @@ class Player {
       // mirror arc when jumping right→left
       if (this.jumpFrom === 'right') scale(-1, 1);
       const pulse = 0.85 + sin(t * PI) * 0.25;
-      image(arc, 0, 0, 28 * pulse, 28 * pulse);
+      image(arc, 0, 0, 40 * pulse, 40 * pulse);
       pop();
     }
     // white slash burst at peak spin (frames ~2-5)
@@ -916,7 +919,7 @@ class Player {
         rotate(t * TWO_PI);
         const a = map(sin(t * PI), 0, 1, 120, 255);
         tint(255, 255, 255, a);
-        image(burst, 0, 0, 22, 22);
+        image(burst, 0, 0, 30, 30);
         pop();
         noTint();
       }
