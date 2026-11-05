@@ -1,7 +1,14 @@
 /**
- * NinJump DX — Cat Climb (local demo)
+ * NinJump DX — Cat Climb (local playable)
  * 貓喺兩邊牆向上爬；空白鍵／點擊跳去對面（有弧度）。
- * 小飛龍由上飛落；炮台射炮彈。唔連 GitHub，本地試玩。
+ * 小飛龍由上飛落；炮台射炮彈。本地試玩，唔 push GitHub。
+ *
+ * Approved demo decisions:
+ * 1) Wall-run: left FLIP+ROTATE_270 / right ROTATE_90 sprites; flush to wall
+ * 2) Camera: walls & bg scroll DOWN → climb-up illusion
+ * 3) Pointed triangular spikes
+ * 4) Polished shield aura + bubble
+ * 5) Every 3 slash HITS → climb boost + cyan afterimages
  */
 
 const VW = 180;
@@ -23,37 +30,35 @@ let best = 0;
 let state = 'title';
 let shake = 0;
 let spawnAcc = 0;
-let comboType = null;
-let comboCount = 0;
+let slashHitCombo = 0; // 0..3 — any slash hit on enemy/obstacle
 let flashMsg = '';
 let flashTimer = 0;
-let bgMode = 'cave'; // cave | tubes | sky
+let bgMode = 'cave';
+let hitFlashTimer = 0;
 
 function preload() {
   const load = (folder, name) => {
     sprites[name] = loadImage(`assets/${folder}/${name}.png`);
   };
 
-  // Ranger Cat player
-  for (let i = 1; i <= 4; i++) {
-    load('player', `cat_wall_run_0${i}`);
-    load('player', `cat_wall_run_0${i}_rightwall`);
+  for (let i = 1; i <= 8; i++) {
+    const id = String(i).padStart(2, '0');
+    load('player', `cat_wall_run_${id}`);
+    load('player', `cat_wall_run_${id}_rightwall`);
   }
   for (let i = 1; i <= 3; i++) {
     load('player', `cat_jump_0${i}`);
     load('player', `cat_jump_0${i}_rightwall`);
   }
-  ['cat_slash','cat_slash_rightwall','cat_fall','cat_fall_rightwall',
-   'cat_land','cat_land_rightwall',
-   'cat_wall_run_01_shield','cat_wall_run_01_shield_rightwall',
-   'cat_jump_01_shield','cat_jump_01_shield_rightwall'
+  ['cat_slash', 'cat_slash_rightwall', 'cat_fall', 'cat_fall_rightwall',
+   'cat_land', 'cat_land_rightwall',
+   'cat_wall_run_01_shield', 'cat_wall_run_01_shield_rightwall',
+   'cat_jump_01_shield', 'cat_jump_01_shield_rightwall'
   ].forEach(n => load('player', n));
 
-  // keep old ninja as silent fallback names mapped in draw
-  ['shield','combo_on','combo_off','boost_star','coin_01','heart','gem','clock']
+  ['shield', 'combo_on', 'combo_off', 'boost_star', 'coin_01', 'heart', 'gem', 'clock']
     .forEach(n => load('items', n));
 
-  // dragons / bats
   for (let i = 0; i < 3; i++) {
     load('enemies', `dragon_right_${i}`);
     load('enemies', `dragon_left_${i}`);
@@ -62,27 +67,29 @@ function preload() {
   }
   for (let i = 0; i < 4; i++) load('enemies', `bat_${i}`);
   load('enemies', 'dragon');
+  ['beetle', 'hornet'].forEach(n => load('enemies', n));
 
-  // light old enemies as rare fillers
-  ['beetle','hornet'].forEach(n => load('enemies', n));
-
-  ['wall_spikes','wall_spikes_right','cannonball','arrow','shuriken']
+  ['wall_spikes', 'wall_spikes_right', 'cannonball', 'arrow', 'shuriken']
     .forEach(n => load('obstacles', n));
-  ['cannon_left','cannon_right'].forEach(n => load('obstacles', n));
+  ['cannon_left', 'cannon_right'].forEach(n => load('obstacles', n));
   for (let i = 1; i <= 5; i++) {
     load('obstacles', `cannon_l_${i}`);
     load('obstacles', `cannon_r_${i}`);
   }
 
-  ['classic','castle','pirate','jungle'].forEach(t => {
+  ['classic', 'castle', 'pirate', 'jungle'].forEach(t => {
     load('tiles', `wall_${t}`);
     load('tiles', `wall_edge_${t}`);
   });
 
-  ['slash_01','slash_02','land_dust_01','hit_puff',
-   'shield_aura_01','shield_aura_02','shield_aura_03','shield_aura_04',
-   'explode_1','explode_2','explode_3'].forEach(n => load('effects', n));
-  ['height_flag','medal'].forEach(n => load('ui', n));
+  ['slash_01', 'slash_02', 'land_dust_01', 'hit_puff',
+   'explode_1', 'explode_2', 'explode_3'].forEach(n => load('effects', n));
+  for (let i = 1; i <= 8; i++) {
+    load('effects', `shield_aura_0${i}`);
+  }
+  load('effects', 'shield_bubble');
+  load('effects', 'shield_hit_flash');
+  ['height_flag', 'medal'].forEach(n => load('ui', n));
 
   bgImg = loadImage('assets/bg/bg_cave.png');
   bgTube = loadImage('assets/bg/bg_tubes.png');
@@ -114,10 +121,10 @@ function resetRun(startPlay) {
   particles = [];
   camY = 0;
   spawnAcc = 0;
-  comboType = null;
-  comboCount = 0;
+  slashHitCombo = 0;
   flashMsg = '';
   flashTimer = 0;
+  hitFlashTimer = 0;
   for (let i = 0; i < 8; i++) spawnContent(80 + i * 70);
   state = startPlay ? 'play' : 'title';
 }
@@ -135,6 +142,7 @@ function draw() {
   drawBackground();
   drawWalls();
 
+  // World layer: player stays ~mid-screen; camY tracks -player.y so world scrolls DOWN
   push();
   translate(0, VH * 0.62 + camY);
 
@@ -153,6 +161,7 @@ function draw() {
 
 function updatePlay() {
   player.update();
+  // Climbing UP (player.y ↓) → camY ↑ → walls/bg offsets scroll DOWN
   camY = -player.y;
 
   spawnAcc += player.climbSpeed;
@@ -177,6 +186,7 @@ function updatePlay() {
   }
 
   if (flashTimer > 0) flashTimer--;
+  if (hitFlashTimer > 0) hitFlashTimer--;
 
   const dist = floor(max(0, -player.y) / 10);
   if (dist > best) {
@@ -191,14 +201,14 @@ function handleCollision(e) {
     if (e.type === 'shield') { player.hasShield = true; flash('SHIELD!', 40); }
     else if (e.type === 'heart') { player.invuln = max(player.invuln, 60); flash('SAFE!', 35); }
     else if (e.type === 'gem') { player.y -= 80; flash('GEM UP!', 35); }
-    else if (e.type === 'clock') { player.boostTimer = max(player.boostTimer, 70); flash('BOOST', 35); }
+    else if (e.type === 'clock') { player.activateBoost(70); flash('BOOST', 35); }
     return;
   }
   if (e.kind === 'enemy') {
     if (player.slashing) {
       e.dead = true;
       spawnHit(e.x, e.y);
-      registerCombo(e.type);
+      registerSlashHit();
       shake = 2;
       return;
     }
@@ -207,13 +217,19 @@ function handleCollision(e) {
     return;
   }
   if (e.kind === 'obstacle') {
-    if (player.slashing && (e.type === 'cannonball' || e.type === 'shuriken' || e.type === 'arrow')) {
+    if (player.slashing && (e.type === 'cannonball' || e.type === 'shuriken' || e.type === 'arrow' || e.type === 'wall_spikes')) {
+      // slashable projectiles; spikes only count if mid-slash contact (rare) — keep projectiles
+      if (e.type === 'wall_spikes') {
+        hurtPlayer();
+        return;
+      }
       e.dead = true;
       spawnHit(e.x, e.y);
+      registerSlashHit();
       return;
     }
     hurtPlayer();
-    e.dead = true;
+    if (e.type !== 'cannon' && e.type !== 'wall_spikes') e.dead = true;
   }
 }
 
@@ -222,24 +238,27 @@ function hurtPlayer() {
   if (player.hasShield) {
     player.hasShield = false;
     player.invuln = 40;
+    hitFlashTimer = 12;
     flash('SHIELD BREAK', 35);
     shake = 3;
     return;
   }
   player.die();
+  slashHitCombo = 0;
   state = 'dead';
   shake = 5;
 }
 
-function registerCombo(type) {
-  if (comboType === type) comboCount++;
-  else { comboType = type; comboCount = 1; }
-  if (comboCount >= 3) {
-    player.boostTimer = 90;
-    comboCount = 0;
-    comboType = null;
-    flash('BOOST!', 50);
-    for (let i = 0; i < 10; i++) particles.push(new Particle(player.x, player.y - 10, color(255, 220, 80)));
+/** Every 3 jump-slashes that HIT an enemy/projectile → climb boost + afterimages */
+function registerSlashHit() {
+  slashHitCombo++;
+  if (slashHitCombo >= 3) {
+    slashHitCombo = 0;
+    player.activateBoost(90);
+    flash('DASH!', 50);
+    for (let i = 0; i < 12; i++) {
+      particles.push(new Particle(player.x, player.y - 10, color(80, 255, 255)));
+    }
   }
 }
 
@@ -248,17 +267,14 @@ function spawnContent(worldY) {
   if (r < 0.10) {
     entities.push(new Pickup(VW / 2 + random(-20, 20), worldY, random(['shield', 'shield', 'heart', 'gem', 'clock'])));
   } else if (r < 0.28) {
-    // 炮台
     const side = random() < 0.5 ? 'left' : 'right';
     const x = side === 'left' ? GAP_L + 8 : GAP_R - 8;
     entities.push(new Cannon(x, worldY, side));
   } else if (r < 0.72) {
-    // 小飛龍／蝙蝠由上飛落
     const kind = random() < 0.75 ? 'dragon' : 'bat';
     const x = GAP_L + 16 + random(VW - WALL * 2 - 32);
     entities.push(new Flyer(x, worldY, kind));
   } else if (r < 0.88) {
-    // 偶有貼牆小怪
     const side = random(['left', 'right']);
     const x = side === 'left' ? GAP_L + 14 : GAP_R - 14;
     entities.push(new Enemy(x, worldY, random(['beetle', 'hornet']), side));
@@ -303,15 +319,13 @@ function drawBackground() {
   else img = bgImg;
 
   if (img && img.width) {
-    // 無限向上：跟 camY 垂直循環
-    const th = img.height * (VW / img.width); // 縮放至畫面闊
     const scaleX = VW / img.width;
     const tileH = img.height * scaleX;
-    const off = ((-camY * 0.35) % tileH + tileH) % tileH;
+    // camY ↑ → off ↑ → tiles shift DOWN (climb-up illusion)
+    const off = ((camY * 0.35) % tileH + tileH) % tileH;
     for (let y = -tileH; y < VH + tileH; y += tileH) {
-      image(img, 0, y + off - tileH * 0, VW, tileH);
+      image(img, 0, y + off, VW, tileH);
     }
-    // 暗一層令角色清楚
     fill(0, bgMode === 'sky' ? 40 : 70);
     rect(WALL, 0, VW - WALL * 2, VH);
   } else {
@@ -326,7 +340,8 @@ function drawBackground() {
 function drawWalls() {
   const tile = sprites.wall_classic || sprites.wall_castle;
   const edge = sprites.wall_edge_classic;
-  const off = ((-camY % 16) + 16) % 16;
+  // camY ↑ → off ↑ → brick tiles scroll DOWN
+  const off = ((camY % 16) + 16) % 16;
   for (let y = -16; y < VH + 16; y += 16) {
     if (tile) {
       image(tile, 0, y + off - 16, WALL, 16);
@@ -336,12 +351,15 @@ function drawWalls() {
     }
   }
   if (edge) {
-    image(edge, WALL - 6, 0, 6, VH);
-    push();
-    translate(VW - WALL + 6, 0);
-    scale(-1, 1);
-    image(edge, 0, 0, 6, VH);
-    pop();
+    // scroll edges with same offset for continuity
+    for (let y = -16; y < VH + 16; y += 16) {
+      image(edge, WALL - 6, y + off - 16, 6, 16);
+      push();
+      translate(VW - WALL + 6, y + off - 16);
+      scale(-1, 1);
+      image(edge, 0, 0, 6, 16);
+      pop();
+    }
   }
 }
 
@@ -358,11 +376,18 @@ function drawHUD() {
   textAlign(RIGHT, CENTER);
   text(`BEST ${best}`, VW - 6, 11);
 
+  // slash-hit combo meter (need 3 hits for DASH)
   for (let i = 0; i < 3; i++) {
-    const sp = sprites[i < comboCount ? 'combo_on' : 'combo_off'];
+    const sp = sprites[i < slashHitCombo ? 'combo_on' : 'combo_off'];
     if (sp) image(sp, 50 + i * 10, 6, 8, 8);
   }
   if (player && player.hasShield && sprites.shield) image(sprites.shield, VW / 2 - 8, 2, 16, 16);
+  if (player && player.boostTimer > 0) {
+    fill(80, 255, 255);
+    textAlign(CENTER, CENTER);
+    textSize(7);
+    text('DASH', VW / 2 + 22, 11);
+  }
 
   if (flashTimer > 0) {
     fill(255, 230, 80);
@@ -383,16 +408,17 @@ function drawTitle() {
   fill(255);
   textAlign(CENTER, CENTER);
   textSize(12);
-  text('Cat Climb DX', VW / 2, VH / 2 - 42);
+  text('Cat Climb DX', VW / 2, VH / 2 - 48);
   textSize(7);
   fill(255, 200, 80);
-  text('Ranger Cat · NinJump style', VW / 2, VH / 2 - 26);
+  text('Ranger Cat · NinJump style', VW / 2, VH / 2 - 32);
   fill(220);
-  text('空白鍵／點擊 → 跳去對面牆', VW / 2, VH / 2 + 4);
-  text('空中可斬小飛龍同炮彈', VW / 2, VH / 2 + 16);
-  text('連續斬 3 隻同類 = BOOST', VW / 2, VH / 2 + 28);
+  text('空白鍵／點擊 → 跳去對面牆', VW / 2, VH / 2 - 2);
+  text('空中可斬小飛龍同炮彈', VW / 2, VH / 2 + 10);
+  text('斬中 3 次 → DASH 疾走＋殘影', VW / 2, VH / 2 + 22);
+  text('攞盾 = 藍色光環防護', VW / 2, VH / 2 + 34);
   fill(180);
-  text('按空白鍵開始', VW / 2, VH / 2 + 50);
+  text('按空白鍵開始', VW / 2, VH / 2 + 56);
 }
 
 function drawDead() {
@@ -418,7 +444,7 @@ function flash(msg, t) { flashMsg = msg; flashTimer = t; }
 class Player {
   constructor() {
     this.side = 'left';
-    this.x = GAP_L + 2;
+    this.x = GAP_L;
     this.y = 0;
     this.vy = 0;
     this.jumpT = 0;
@@ -433,9 +459,15 @@ class Player {
     this.climbSpeed = 1.6;
     this.w = 14;
     this.h = 20;
+    this.trail = []; // afterimage samples {x,y,side,jumpFrom,anim,name hint}
+    this.hitThisSlash = false;
   }
 
   get climbing() { return this.side === 'left' || this.side === 'right'; }
+
+  activateBoost(frames) {
+    this.boostTimer = max(this.boostTimer, frames);
+  }
 
   jump() {
     if (this.dead || !this.climbing) return;
@@ -444,6 +476,7 @@ class Player {
     this.jumpT = 0;
     this.slashing = true;
     this.slashFrame = 0;
+    this.hitThisSlash = false;
   }
 
   die() {
@@ -451,6 +484,7 @@ class Player {
     this.slashing = false;
     this.side = 'air';
     this.vy = 2;
+    this.trail = [];
   }
 
   update() {
@@ -460,88 +494,148 @@ class Player {
       return;
     }
 
-    const base = this.boostTimer > 0 ? 3.2 : 1.6;
+    const base = this.boostTimer > 0 ? 3.4 : 1.6;
     this.climbSpeed = base;
     if (this.boostTimer > 0) this.boostTimer--;
     if (this.invuln > 0) this.invuln--;
 
     if (this.climbing) {
       this.y -= this.climbSpeed;
-      this.x = this.side === 'left' ? GAP_L + 2 : GAP_R - 2;
-      this.anim += 0.28;
+      this.x = this.side === 'left' ? GAP_L : GAP_R;
+      this.anim += this.boostTimer > 0 ? 0.45 : 0.28;
       this.slashing = false;
     } else {
-      // 更大弧度跳去對面牆
       this.jumpT++;
-      const dur = 22; // 稍慢，弧線更明顯
+      const dur = 22;
       const t = constrain(this.jumpT / dur, 0, 1);
-      // ease in-out 水平
       const te = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2;
-      const fromX = this.jumpFrom === 'left' ? GAP_L + 2 : GAP_R - 2;
-      const toX = this.jumpFrom === 'left' ? GAP_R - 2 : GAP_L + 2;
+      const fromX = this.jumpFrom === 'left' ? GAP_L : GAP_R;
+      const toX = this.jumpFrom === 'left' ? GAP_R : GAP_L;
       this.x = lerp(fromX, toX, te);
-      // 持續向上 + 明顯拋物線弧（向畫面上方凸）
       this.y -= this.climbSpeed * 0.9;
       this.y -= sin(t * PI) * 4.5;
 
       this.slashFrame = floor(t * 3);
       if (t >= 1) {
         this.side = this.jumpFrom === 'left' ? 'right' : 'left';
-        this.x = this.side === 'left' ? GAP_L + 2 : GAP_R - 2;
+        this.x = this.side === 'left' ? GAP_L : GAP_R;
         this.slashing = false;
         particles.push(new Particle(this.x, this.y + 8, color(220, 220, 230)));
       }
     }
+
+    // record trail while boosting (for afterimages)
+    if (this.boostTimer > 0 && frameCount % 2 === 0) {
+      this.trail.push({
+        x: this.x,
+        y: this.y,
+        side: this.side,
+        jumpFrom: this.jumpFrom,
+        anim: this.anim,
+        slashFrame: this.slashFrame,
+        air: this.side === 'air'
+      });
+      if (this.trail.length > 6) this.trail.shift();
+    } else if (this.boostTimer <= 0) {
+      this.trail = [];
+    }
+  }
+
+  spriteName(side, jumpFrom, anim, slashFrame, air, dead) {
+    const useRightWall = (side === 'right') || (air && jumpFrom === 'left');
+    if (dead) return useRightWall ? 'cat_fall_rightwall' : 'cat_fall';
+    if (air) {
+      const f = constrain(slashFrame + 1, 1, 3);
+      return useRightWall ? `cat_jump_0${f}_rightwall` : `cat_jump_0${f}`;
+    }
+    const f = String((floor(anim) % 8) + 1).padStart(2, '0');
+    return side === 'right' ? `cat_wall_run_${f}_rightwall` : `cat_wall_run_${f}`;
+  }
+
+  drawSpriteAt(sp, x, y, side, air) {
+    if (!sp) return;
+    imageMode(CORNER);
+    let dx, dy;
+    dy = y - sp.height / 2;
+    if (air) {
+      dx = x - sp.width / 2;
+    } else if (side === 'left') {
+      // flush: feet on left wall
+      dx = GAP_L;
+    } else if (side === 'right') {
+      // flush: feet on right wall
+      dx = GAP_R - sp.width;
+    } else {
+      dx = x - sp.width / 2;
+    }
+    image(sp, dx, dy);
+  }
+
+  drawAfterimages() {
+    if (this.trail.length < 2) return;
+    // draw oldest first; 2–3 translucent cyan-tinted copies
+    const samples = this.trail.slice(0, -1).slice(-3);
+    for (let i = 0; i < samples.length; i++) {
+      const s = samples[i];
+      const name = this.spriteName(s.side, s.jumpFrom, s.anim, s.slashFrame, s.air, false);
+      const sp = sprites[name] || sprites.cat_wall_run_01;
+      if (!sp) continue;
+      const alpha = map(i, 0, samples.length - 1, 60, 140);
+      push();
+      tint(80, 255, 255, alpha);
+      this.drawSpriteAt(sp, s.x, s.y, s.side, s.air);
+      pop();
+      noTint();
+    }
+  }
+
+  drawShieldFX() {
+    if (!this.hasShield || this.dead) return;
+    const cx = this.side === 'left' ? GAP_L + 12
+      : this.side === 'right' ? GAP_R - 12
+      : this.x;
+    const cy = this.y;
+    const ai = 1 + (floor(frameCount / 3) % 8);
+    const aura = sprites[`shield_aura_0${ai}`];
+    imageMode(CENTER);
+    if (aura) {
+      push();
+      translate(cx, cy);
+      // gentle rotate via frame cycling already; add slight scale pulse
+      const pulse = 1 + sin(frameCount * 0.15) * 0.06;
+      image(aura, 0, 0, 32 * pulse, 32 * pulse);
+      pop();
+    }
+    const bubble = sprites.shield_bubble;
+    if (bubble) {
+      push();
+      translate(cx, cy);
+      rotate(frameCount * 0.04);
+      image(bubble, 0, 0, 30, 30);
+      pop();
+    }
+    if (hitFlashTimer > 0 && sprites.shield_hit_flash) {
+      const a = map(hitFlashTimer, 0, 12, 0, 255);
+      push();
+      tint(255, 255, 255, a);
+      image(sprites.shield_hit_flash, cx, cy, 36, 36);
+      pop();
+      noTint();
+    }
+    imageMode(CORNER);
   }
 
   draw() {
-    if (this.invuln > 0 && frameCount % 4 < 2) return;
+    if (this.invuln > 0 && frameCount % 4 < 2 && !this.hasShield) return;
 
-    let name;
-    const useRightWall = (this.side === 'right') || (this.side === 'air' && this.jumpFrom === 'left');
+    // afterimages behind (trail is lower / older climb positions)
+    if (this.boostTimer > 0) this.drawAfterimages();
 
-    if (this.dead) {
-      name = useRightWall ? 'cat_fall_rightwall' : 'cat_fall';
-    } else if (this.side === 'air') {
-      const f = constrain(this.slashFrame + 1, 1, 3);
-      if (this.hasShield) {
-        name = useRightWall ? 'cat_jump_01_shield_rightwall' : 'cat_jump_01_shield';
-      } else {
-        name = useRightWall ? `cat_jump_0${f}_rightwall` : `cat_jump_0${f}`;
-      }
-    } else {
-      const f = (floor(this.anim) % 4) + 1;
-      if (this.hasShield) {
-        name = this.side === 'right' ? 'cat_wall_run_01_shield_rightwall' : 'cat_wall_run_01_shield';
-      } else {
-        name = this.side === 'right' ? `cat_wall_run_0${f}_rightwall` : `cat_wall_run_0${f}`;
-      }
-    }
-
+    const name = this.spriteName(this.side, this.jumpFrom, this.anim, this.slashFrame, this.side === 'air', this.dead);
     const sp = sprites[name] || sprites.cat_wall_run_01;
     if (sp) {
-      imageMode(CORNER);
-      let dx, dy;
-      dy = this.y - sp.height / 2;
-      if (this.side === 'air') {
-        dx = this.x - sp.width / 2;
-        dy = this.y - sp.height / 2;
-      } else if (this.side === 'left') {
-        dx = this.x;
-      } else {
-        dx = this.x - sp.width;
-      }
-      image(sp, dx, dy);
-
-      if (this.hasShield && !this.dead) {
-        const ai = 1 + (floor(frameCount / 4) % 4);
-        const aura = sprites[`shield_aura_0${ai}`];
-        if (aura) {
-          imageMode(CENTER);
-          image(aura, this.x + (this.side === 'left' ? 10 : this.side === 'right' ? -10 : 0), this.y, 28, 28);
-          imageMode(CORNER);
-        }
-      }
+      this.drawSpriteAt(sp, this.x, this.y, this.side, this.side === 'air');
+      this.drawShieldFX();
     } else {
       fill(240, 180, 80);
       rect(this.x - 6, this.y - 10, 12, 20);
@@ -549,9 +643,10 @@ class Player {
 
     if (this.boostTimer > 0) {
       noFill();
-      stroke(255, 220, 80, 180);
+      stroke(80, 255, 255, 160);
       strokeWeight(1);
-      rect(this.x - 10, this.y - 14, 20, 26);
+      const bx = this.side === 'left' ? GAP_L + 2 : this.side === 'right' ? GAP_R - 22 : this.x - 10;
+      rect(bx, this.y - 14, 20, 26);
       noStroke();
     }
   }
@@ -560,24 +655,23 @@ class Player {
   slashbox() { return { x: this.x - 14, y: this.y - 14, w: 28, h: 26 }; }
 }
 
-/* ========== Flying dragon / bat — 由上飛落 ========== */
+/* ========== Flying dragon / bat ========== */
 class Flyer {
   constructor(x, y, kind) {
     this.x = x;
     this.y = y;
     this.kind = 'enemy';
-    this.type = kind; // dragon | bat
+    this.type = kind;
     this.dead = false;
     this.w = 16; this.h = 14;
-    this.vy = random(0.35, 0.85); // 向下飛（世界 y 增大＝畫面下方；玩家向上 y 減）
-    // 世界座標：玩家向上係 y 變負。小怪喺上方（更細／更負嘅 y）飛落＝y 增加
+    this.vy = random(0.35, 0.85);
     this.vx = random(-0.4, 0.4);
     this.frame = 0;
     this.facing = this.vx >= 0 ? 'right' : 'left';
     this.gold = kind === 'dragon' && random() < 0.35;
   }
   update() {
-    this.y += this.vy;          // 飛落（往玩家方向／往畫面下方）
+    this.y += this.vy;
     this.x += this.vx + sin(frameCount * 0.08 + this.y * 0.02) * 0.25;
     this.x = constrain(this.x, GAP_L + 10, GAP_R - 10);
     this.frame += 0.2;
@@ -590,7 +684,6 @@ class Flyer {
     } else if (this.gold) {
       sp = sprites[`dragon_gold_${fi}`];
     } else {
-      // 用 downish 為主，更似由上落
       sp = sprites[`dragon_downish_${fi}`] || sprites[`dragon_${this.facing}_${fi}`];
     }
     if (sp) {
@@ -636,6 +729,7 @@ class Obstacle {
     this.w = 12; this.h = 14; this.vx = 0;
     if (type === 'arrow') this.vx = side === 'left' ? 1.2 : -1.2;
     if (type === 'cannonball' || type === 'shuriken') this.vx = side === 'left' ? 0.9 : -0.9;
+    if (type === 'wall_spikes') { this.w = 14; this.h = 18; }
   }
   update() {
     this.x += this.vx;
@@ -645,12 +739,26 @@ class Obstacle {
     let key = this.type;
     if (this.type === 'wall_spikes' && this.side === 'right') key = 'wall_spikes_right';
     const sp = sprites[key] || sprites[this.type];
-    if (sp) { imageMode(CENTER); image(sp, this.x, this.y); imageMode(CORNER); }
-    else { fill(150); rect(this.x - 5, this.y - 6, 10, 12); }
+    if (sp) {
+      imageMode(CENTER);
+      // flush spikes to wall edge
+      let dx = this.x;
+      if (this.type === 'wall_spikes') {
+        dx = this.side === 'left' ? GAP_L + sp.width / 2 : GAP_R - sp.width / 2;
+      }
+      image(sp, dx, this.y);
+      imageMode(CORNER);
+    } else {
+      fill(150); rect(this.x - 5, this.y - 6, 10, 12);
+    }
   }
   collides(p) {
     const box = p.slashing ? p.slashbox() : p.hitbox();
-    return aabb(box, { x: this.x - this.w / 2, y: this.y - this.h / 2, w: this.w, h: this.h });
+    let hx = this.x;
+    if (this.type === 'wall_spikes') {
+      hx = this.side === 'left' ? GAP_L + this.w / 2 : GAP_R - this.w / 2;
+    }
+    return aabb(box, { x: hx - this.w / 2, y: this.y - this.h / 2, w: this.w, h: this.h });
   }
 }
 
