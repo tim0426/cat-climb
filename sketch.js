@@ -11,6 +11,8 @@
  * 4) Shield: 8-frame aura + bubble + hit_flash (demo/shield_pack)
  * 5) Every 3 slash HITS → climb boost + cyan trailing afterimages
  * 6) Player cat sprites scaled ~18px body (NEAREST) to match dragon/bat (~14-16px)
+ * 7) GEM teleport: scene-wide dash feel — speed streaks + screen afterimages + cyan tint
+ * 8) Jump spin slash: midair rotating slash (NEAREST spin frames + slash arc VFX)
  */
 
 const VW = 180;
@@ -37,6 +39,10 @@ let flashMsg = '';
 let flashTimer = 0;
 let bgMode = 'cave';
 let hitFlashTimer = 0;
+let gemWarpTimer = 0;      // frames remaining of GEM scene-wide warp
+let gemWarpPhase = 0;      // 0..1 progress
+let gemStreaks = [];       // screen-space speed streaks regenerated each warp
+let gemGhosts = [];        // world-space afterimage samples during warp
 
 function preload() {
   const load = (folder, name) => {
@@ -85,7 +91,14 @@ function preload() {
   });
 
   ['slash_01', 'slash_02', 'land_dust_01', 'hit_puff',
-   'explode_1', 'explode_2', 'explode_3'].forEach(n => load('effects', n));
+   'explode_1', 'explode_2', 'explode_3',
+   'spin_slash_burst'].forEach(n => load('effects', n));
+  for (let i = 1; i <= 4; i++) load('effects', `spin_slash_arc_0${i}`);
+  for (let i = 0; i < 8; i++) {
+    const id = String(i).padStart(2, '0');
+    load('player', `cat_spin_${id}`);
+    load('player', `cat_spin_${id}_rightwall`);
+  }
   for (let i = 1; i <= 8; i++) {
     load('effects', `shield_aura_0${i}`);
   }
@@ -127,6 +140,10 @@ function resetRun(startPlay) {
   flashMsg = '';
   flashTimer = 0;
   hitFlashTimer = 0;
+  gemWarpTimer = 0;
+  gemWarpPhase = 0;
+  gemStreaks = [];
+  gemGhosts = [];
   for (let i = 0; i < 8; i++) spawnContent(80 + i * 70);
   state = startPlay ? 'play' : 'title';
 }
@@ -155,6 +172,7 @@ function draw() {
   for (let p of particles) p.draw();
   pop();
 
+  drawGemWarpScreenFX();
   drawHUD();
   if (state === 'title') drawTitle();
   if (state === 'dead') drawDead();
@@ -163,6 +181,7 @@ function draw() {
 
 function updatePlay() {
   player.update();
+  updateGemWarp();
   // Climbing UP (player.y ↓) → camY ↑ → walls/bg offsets scroll DOWN
   camY = -player.y;
 
@@ -202,7 +221,7 @@ function handleCollision(e) {
     e.dead = true;
     if (e.type === 'shield') { player.hasShield = true; flash('SHIELD!', 40); }
     else if (e.type === 'heart') { player.invuln = max(player.invuln, 60); flash('SAFE!', 35); }
-    else if (e.type === 'gem') { player.y -= 80; flash('GEM UP!', 35); }
+    else if (e.type === 'gem') { startGemWarp(80); flash('GEM UP!', 45); }
     else if (e.type === 'clock') { player.activateBoost(70); flash('BOOST', 35); }
     return;
   }
@@ -418,9 +437,10 @@ function drawTitle() {
   text('空白鍵／點擊 → 跳去對面牆', VW / 2, VH / 2 - 2);
   text('空中可斬小飛龍同炮彈', VW / 2, VH / 2 + 10);
   text('斬中 3 次 → DASH 疾走＋殘影', VW / 2, VH / 2 + 22);
-  text('攞盾 = 藍色光環防護', VW / 2, VH / 2 + 34);
+  text('藍寶石 = 全場 WARP · 跳牆旋轉斬', VW / 2, VH / 2 + 34);
+  text('攞盾 = 藍色光環防護', VW / 2, VH / 2 + 46);
   fill(180);
-  text('按空白鍵開始', VW / 2, VH / 2 + 56);
+  text('按空白鍵開始', VW / 2, VH / 2 + 68);
 }
 
 function drawDead() {
@@ -441,6 +461,151 @@ function drawDead() {
 }
 
 function flash(msg, t) { flashMsg = msg; flashTimer = t; }
+
+/* ========== GEM teleport — scene-wide dash feel ========== */
+const GEM_WARP_DUR = 28; // frames of full-screen warp
+
+function startGemWarp(distance) {
+  gemWarpTimer = GEM_WARP_DUR;
+  gemWarpPhase = 0;
+  gemGhosts = [];
+  // seed screen-space vertical speed streaks (gap only)
+  gemStreaks = [];
+  for (let i = 0; i < 28; i++) {
+    gemStreaks.push({
+      x: GAP_L + 4 + random(VW - WALL * 2 - 8),
+      y: random(-40, VH),
+      len: random(28, 95),
+      thick: random() < 0.65 ? 1 : 2,
+      speed: random(10, 22),
+      bright: random()
+    });
+  }
+  for (let i = 0; i < 6; i++) {
+    gemStreaks.push({
+      x: GAP_L + 10 + random(VW - WALL * 2 - 20),
+      y: random(-80, VH),
+      len: random(110, 160),
+      thick: 1,
+      speed: random(16, 28),
+      bright: 0.95
+    });
+  }
+  player.gemWarpDist = distance;
+  player.gemWarpFromY = player.y;
+  player.invuln = max(player.invuln, GEM_WARP_DUR + 10);
+  // pickup flash burst particles
+  for (let i = 0; i < 16; i++) {
+    particles.push(new Particle(player.x, player.y, color(80, 255, 255)));
+  }
+  shake = max(shake, 2.5);
+}
+
+function updateGemWarp() {
+  if (gemWarpTimer <= 0) return;
+  gemWarpTimer--;
+  const t = 1 - gemWarpTimer / GEM_WARP_DUR;
+  gemWarpPhase = t;
+  // ease-out upward teleport
+  const eased = 1 - pow(1 - constrain(t, 0, 1), 2.2);
+  if (player && !player.dead && player.gemWarpDist) {
+    player.y = player.gemWarpFromY - player.gemWarpDist * eased;
+    // sample afterimages densely during peak warp
+    if (t > 0.08 && t < 0.92 && frameCount % 2 === 0) {
+      gemGhosts.push({
+        x: player.x + random(-3, 3),
+        y: player.y,
+        side: player.side,
+        jumpFrom: player.jumpFrom,
+        anim: player.anim,
+        slashFrame: player.slashFrame,
+        air: player.side === 'air',
+        spinFrame: player.spinFrame || 0,
+        life: 18
+      });
+      if (gemGhosts.length > 14) gemGhosts.shift();
+    }
+  }
+  // advance streaks downward (climb-up illusion)
+  for (let s of gemStreaks) {
+    s.y += s.speed;
+    if (s.y > VH + 20) {
+      s.y = -s.len - random(10);
+      s.x = GAP_L + 4 + random(VW - WALL * 2 - 8);
+    }
+  }
+  for (let i = gemGhosts.length - 1; i >= 0; i--) {
+    gemGhosts[i].life--;
+    if (gemGhosts[i].life <= 0) gemGhosts.splice(i, 1);
+  }
+  if (gemWarpTimer <= 0) {
+    // settle: keep a couple fading ghosts
+    gemStreaks = [];
+    player.gemWarpDist = 0;
+  }
+}
+
+/** Screen-space cyan tint + vertical speed streaks (whole viewport) */
+function drawGemWarpScreenFX() {
+  if (gemWarpTimer <= 0 && gemGhosts.length === 0) return;
+  const peak = gemWarpTimer > 0
+    ? sin(constrain(gemWarpPhase, 0, 1) * PI) // envelope
+    : 0;
+  const tintA = gemWarpTimer > 0 ? 35 + peak * 55 : 0;
+
+  // cyan wash over playfield
+  if (tintA > 0) {
+    noStroke();
+    fill(35, 150, 220, tintA);
+    rect(WALL, 0, VW - WALL * 2, VH);
+    // soft cyan edge bars (viewport glow)
+    const edgeA = 40 + peak * 90;
+    fill(60, 230, 255, edgeA * 0.55);
+    rect(0, 0, 3, VH);
+    rect(VW - 3, 0, 3, VH);
+    rect(0, 0, VW, 2);
+    rect(0, VH - 2, VW, 2);
+    // inner gap outline pulses
+    noFill();
+    stroke(120, 230, 255, 30 + peak * 70);
+    strokeWeight(1);
+    rect(WALL + 1, 1, VW - WALL * 2 - 2, VH - 2);
+    noStroke();
+  }
+
+  // vertical speed streaks across the gap
+  if (gemWarpTimer > 0) {
+    for (let s of gemStreaks) {
+      let a, col;
+      if (s.bright > 0.78) { a = 180 + peak * 60; fill(160, 250, 255, a); }
+      else if (s.bright > 0.4) { a = 120 + peak * 50; fill(60, 230, 255, a); }
+      else { a = 80 + peak * 40; fill(30, 120, 180, a); }
+      rect(s.x, s.y, s.thick, s.len);
+      // short spark dashes
+      if (s.bright > 0.85 && (frameCount + int(s.x)) % 5 === 0) {
+        fill(255, 255, 255, 140 + peak * 60);
+        rect(s.x - 1, s.y + s.len * 0.3, 4, 1);
+      }
+    }
+  }
+}
+
+/** World-space screen afterimages drawn with player (inside cam translate) */
+function drawGemWarpGhosts() {
+  if (!gemGhosts.length || !player) return;
+  for (let i = 0; i < gemGhosts.length; i++) {
+    const g = gemGhosts[i];
+    const name = player.spriteName(g.side, g.jumpFrom, g.anim, g.slashFrame, g.air, false, g.spinFrame);
+    const sp = sprites[name] || sprites.cat_wall_run_01;
+    if (!sp) continue;
+    const alpha = map(g.life, 0, 18, 20, 160);
+    push();
+    tint(60, 230, 255, alpha);
+    player.drawSpriteAt(sp, g.x, g.y, g.side, g.air);
+    pop();
+    noTint();
+  }
+}
 
 /* ========== Player ========== */
 class Player {
@@ -463,6 +628,10 @@ class Player {
     this.h = 13;
     this.trail = []; // afterimage samples {x,y,side,jumpFrom,anim,name hint}
     this.hitThisSlash = false;
+    this.spinFrame = 0;       // 0..7 jump spin slash pose
+    this.gemWarpDist = 0;
+    this.gemWarpFromY = 0;
+    this.slashTrail = [];     // cyan path dots during spin jump
   }
 
   get climbing() { return this.side === 'left' || this.side === 'right'; }
@@ -478,7 +647,9 @@ class Player {
     this.jumpT = 0;
     this.slashing = true;
     this.slashFrame = 0;
+    this.spinFrame = 0;
     this.hitThisSlash = false;
+    this.slashTrail = [];
   }
 
   die() {
@@ -487,6 +658,7 @@ class Player {
     this.side = 'air';
     this.vy = 2;
     this.trail = [];
+    this.slashTrail = [];
   }
 
   update() {
@@ -518,10 +690,23 @@ class Player {
       this.y -= sin(t * PI) * 4.5;
 
       this.slashFrame = floor(t * 3);
+      // full midair spin: 8 NEAREST frames across the arc
+      this.spinFrame = constrain(floor(t * 8), 0, 7);
+      // cyan slash path trail
+      if (this.jumpT % 2 === 0) {
+        this.slashTrail.push({ x: this.x, y: this.y, life: 12 });
+        if (this.slashTrail.length > 10) this.slashTrail.shift();
+      }
+      for (let i = this.slashTrail.length - 1; i >= 0; i--) {
+        this.slashTrail[i].life--;
+        if (this.slashTrail[i].life <= 0) this.slashTrail.splice(i, 1);
+      }
       if (t >= 1) {
         this.side = this.jumpFrom === 'left' ? 'right' : 'left';
         this.x = this.side === 'left' ? GAP_L : GAP_R;
         this.slashing = false;
+        this.spinFrame = 0;
+        this.slashTrail = [];
         particles.push(new Particle(this.x, this.y + 8, color(220, 220, 230)));
       }
     }
@@ -535,6 +720,7 @@ class Player {
         jumpFrom: this.jumpFrom,
         anim: this.anim,
         slashFrame: this.slashFrame,
+        spinFrame: this.spinFrame,
         air: this.side === 'air'
       });
       if (this.trail.length > 10) this.trail.shift();
@@ -543,10 +729,15 @@ class Player {
     }
   }
 
-  spriteName(side, jumpFrom, anim, slashFrame, air, dead) {
+  spriteName(side, jumpFrom, anim, slashFrame, air, dead, spinFrame) {
     const useRightWall = (side === 'right') || (air && jumpFrom === 'left');
     if (dead) return useRightWall ? 'cat_fall_rightwall' : 'cat_fall';
     if (air) {
+      // Jump spin slash: prefer pre-rotated NEAREST spin frames
+      const sf = (spinFrame == null) ? slashFrame : spinFrame;
+      const id = String(constrain(sf, 0, 7)).padStart(2, '0');
+      const spinKey = useRightWall ? `cat_spin_${id}_rightwall` : `cat_spin_${id}`;
+      if (sprites[spinKey]) return spinKey;
       const f = constrain(slashFrame + 1, 1, 3);
       return useRightWall ? `cat_jump_0${f}_rightwall` : `cat_jump_0${f}`;
     }
@@ -585,7 +776,7 @@ class Player {
     for (let i = 0; i < idxs.length; i++) {
       const s = this.trail[idxs[i]];
       if (!s) continue;
-      const name = this.spriteName(s.side, s.jumpFrom, s.anim, s.slashFrame, s.air, false);
+      const name = this.spriteName(s.side, s.jumpFrom, s.anim, s.slashFrame, s.air, false, s.spinFrame);
       const sp = sprites[name] || sprites.cat_wall_run_01;
       if (!sp) continue;
       const alpha = map(i, 0, idxs.length - 1, 45, 150);
@@ -636,12 +827,25 @@ class Player {
   }
 
   draw() {
-    if (this.invuln > 0 && frameCount % 4 < 2 && !this.hasShield) return;
+    if (this.invuln > 0 && frameCount % 4 < 2 && !this.hasShield && gemWarpTimer <= 0) return;
+
+    // GEM screen afterimages (world layer)
+    drawGemWarpGhosts();
 
     // afterimages behind (trail is lower / older climb positions)
     if (this.boostTimer > 0) this.drawAfterimages();
 
-    const name = this.spriteName(this.side, this.jumpFrom, this.anim, this.slashFrame, this.side === 'air', this.dead);
+    // cyan path trail under spin slash
+    if (this.side === 'air' && this.slashTrail.length) {
+      noStroke();
+      for (let i = 0; i < this.slashTrail.length; i++) {
+        const p = this.slashTrail[i];
+        fill(60, 230, 255, map(p.life, 0, 12, 20, 160));
+        ellipse(p.x, p.y, 3, 3);
+      }
+    }
+
+    const name = this.spriteName(this.side, this.jumpFrom, this.anim, this.slashFrame, this.side === 'air', this.dead, this.spinFrame);
     const sp = sprites[name] || sprites.cat_wall_run_01;
     if (sp) {
       this.drawSpriteAt(sp, this.x, this.y, this.side, this.side === 'air');
@@ -649,6 +853,11 @@ class Player {
     } else {
       fill(240, 180, 80);
       rect(this.x - 4, this.y - 6, 8, 13);
+    }
+
+    // Jump spin slash VFX (arc + burst mid-spin)
+    if (this.side === 'air' && this.slashing && !this.dead) {
+      this.drawSpinSlashFX();
     }
 
     if (this.boostTimer > 0) {
@@ -664,6 +873,76 @@ class Player {
       }
       noStroke();
     }
+
+    // GEM warp: local upward streak companions while warping
+    if (gemWarpTimer > 0) {
+      strokeWeight(1);
+      for (let i = 0; i < 4; i++) {
+        stroke(80, 255, 255, 110 - i * 22);
+        const ox = (i - 1.5) * 3;
+        line(this.x + ox, this.y + 4 + i * 2, this.x + ox, this.y + 18 + i * 5);
+      }
+      noStroke();
+      // yellow warp arrow
+      if (gemWarpPhase > 0.05 && gemWarpPhase < 0.85) {
+        noStroke();
+        fill(255, 220, 80, 220);
+        triangle(this.x, this.y - 16, this.x - 4, this.y - 10, this.x + 4, this.y - 10);
+      }
+    }
+  }
+
+  drawSpinSlashFX() {
+    const t = constrain(this.jumpT / 22, 0, 1);
+    // arc frames 1..4 across mid jump
+    const ai = constrain(1 + floor(t * 4), 1, 4);
+    const arc = sprites[`spin_slash_arc_0${ai}`];
+    imageMode(CENTER);
+    if (arc) {
+      push();
+      translate(this.x, this.y);
+      // mirror arc when jumping right→left
+      if (this.jumpFrom === 'right') scale(-1, 1);
+      const pulse = 0.85 + sin(t * PI) * 0.25;
+      image(arc, 0, 0, 28 * pulse, 28 * pulse);
+      pop();
+    }
+    // white slash burst at peak spin (frames ~2-5)
+    if (t > 0.25 && t < 0.72) {
+      const burst = sprites.spin_slash_burst || sprites.slash_01;
+      if (burst) {
+        push();
+        translate(this.x, this.y);
+        rotate(t * TWO_PI);
+        const a = map(sin(t * PI), 0, 1, 120, 255);
+        tint(255, 255, 255, a);
+        image(burst, 0, 0, 22, 22);
+        pop();
+        noTint();
+      }
+      // radial motion ticks
+      stroke(40, 100, 180, 100);
+      strokeWeight(1);
+      for (let i = 0; i < 6; i++) {
+        const ang = (i / 6) * TWO_PI + t * 4;
+        line(this.x + cos(ang) * 6, this.y + sin(ang) * 6,
+             this.x + cos(ang) * 14, this.y + sin(ang) * 14);
+      }
+      noStroke();
+    }
+    // also flash classic slash sprites briefly
+    if (t > 0.35 && t < 0.55) {
+      const s1 = sprites.slash_02 || sprites.slash_01;
+      if (s1) {
+        push();
+        tint(255, 255, 255, 180);
+        imageMode(CENTER);
+        image(s1, this.x, this.y, 18, 18);
+        pop();
+        noTint();
+      }
+    }
+    imageMode(CORNER);
   }
 
   hitbox() { return { x: this.x - 5, y: this.y - 8, w: 9, h: 14 }; }
