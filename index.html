@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>NinJump DX Pixel Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; touch-action: manipulation; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #0a0e18;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      font-family: monospace;
+      user-select: none; -webkit-user-select: none;
+    }
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      box-shadow: 0 0 40px rgba(0,0,0,.7);
+      max-width: 100vw; max-height: 100vh;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.3/p5.min.js"></script>
+  <script src="sketch.js"></script>
+</head>
+<body></body>
+</html>
