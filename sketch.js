@@ -11,8 +11,8 @@
  * 4) Shield: 8-frame aura + bubble + hit_flash (demo/shield_pack)
  * 5) Every 3 slash HITS → climb boost + cyan trailing afterimages
  * 6) Player cat sprites scaled ~18px body (NEAREST) to match dragon/bat (~14-16px)
- * 7) GEM teleport: scene-wide dash feel — speed streaks + screen afterimages + cyan tint
- * 8) Jump spin slash: midair rotating slash (NEAREST spin frames + slash arc VFX)
+ * 7) GEM teleport: soft dash-like afterimages + subtle streaks (demo/gem_soft_dash_*) — not full-screen wash
+ * 8) Jump spin slash: START+4 midair (spin 00/02/04/06) + single sweeping arc (demo/spin_slash_cleaner_*) — not 米字 spokes
  */
 
 const VW = 180;
@@ -462,47 +462,44 @@ function drawDead() {
 
 function flash(msg, t) { flashMsg = msg; flashTimer = t; }
 
-/* ========== GEM teleport — scene-wide dash feel ========== */
-const GEM_WARP_DUR = 36; // frames of full-screen warp (obvious)
+/* ========== GEM teleport — soft dash-like (demo/gem_soft_dash_*) ========== */
+const GEM_WARP_DUR = 28; // shorter soft dash warp
 
 function startGemWarp(distance) {
   gemWarpTimer = GEM_WARP_DUR;
   gemWarpPhase = 0;
   gemGhosts = [];
-  // seed screen-space vertical speed streaks (gap only)
+  // few thin screen-space streaks (not dense wash)
   gemStreaks = [];
-  for (let i = 0; i < 42; i++) {
+  for (let i = 0; i < 8; i++) {
     gemStreaks.push({
-      x: 2 + random(VW - 4),
-      y: random(-40, VH),
-      len: random(36, 110),
-      thick: random() < 0.5 ? 2 : 3,
-      speed: random(12, 26),
+      x: WALL + 4 + random(VW - WALL * 2 - 8),
+      y: random(-30, VH),
+      len: random(18, 42),
+      thick: 1,
+      speed: random(10, 18),
       bright: random()
-    });
-  }
-  for (let i = 0; i < 10; i++) {
-    gemStreaks.push({
-      x: 4 + random(VW - 8),
-      y: random(-80, VH),
-      len: random(120, 180),
-      thick: 2,
-      speed: random(18, 32),
-      bright: 0.95
     });
   }
   player.gemWarpDist = distance;
   player.gemWarpFromY = player.y;
-  player.invuln = max(player.invuln, GEM_WARP_DUR + 10);
-  // pickup flash burst particles
-  for (let i = 0; i < 16; i++) {
+  player.invuln = max(player.invuln, GEM_WARP_DUR + 8);
+  // soft localized pickup flash (not full-screen)
+  for (let i = 0; i < 6; i++) {
     particles.push(new Particle(player.x, player.y, color(80, 255, 255)));
   }
-  shake = max(shake, 2.5);
+  shake = max(shake, 1.2);
 }
 
 function updateGemWarp() {
-  if (gemWarpTimer <= 0) return;
+  if (gemWarpTimer <= 0) {
+    // let lingering ghosts fade after settle
+    for (let i = gemGhosts.length - 1; i >= 0; i--) {
+      gemGhosts[i].life--;
+      if (gemGhosts[i].life <= 0) gemGhosts.splice(i, 1);
+    }
+    return;
+  }
   gemWarpTimer--;
   const t = 1 - gemWarpTimer / GEM_WARP_DUR;
   gemWarpPhase = t;
@@ -510,10 +507,10 @@ function updateGemWarp() {
   const eased = 1 - pow(1 - constrain(t, 0, 1), 2.2);
   if (player && !player.dead && player.gemWarpDist) {
     player.y = player.gemWarpFromY - player.gemWarpDist * eased;
-    // sample afterimages densely during peak warp
-    if (t > 0.05 && t < 0.95) {
+    // sample sparsely — keep 2–3 dash-like clones
+    if (t > 0.08 && t < 0.9 && frameCount % 3 === 0) {
       gemGhosts.push({
-        x: player.x + random(-3, 3),
+        x: player.x,
         y: player.y,
         side: player.side,
         jumpFrom: player.jumpFrom,
@@ -521,9 +518,9 @@ function updateGemWarp() {
         slashFrame: player.slashFrame,
         air: player.side === 'air',
         spinFrame: player.spinFrame || 0,
-        life: 18
+        life: 14
       });
-      if (gemGhosts.length > 18) gemGhosts.shift();
+      if (gemGhosts.length > 3) gemGhosts.shift();
     }
   }
   // advance streaks downward (climb-up illusion)
@@ -531,7 +528,7 @@ function updateGemWarp() {
     s.y += s.speed;
     if (s.y > VH + 20) {
       s.y = -s.len - random(10);
-      s.x = 2 + random(VW - 4);
+      s.x = WALL + 4 + random(VW - WALL * 2 - 8);
     }
   }
   for (let i = gemGhosts.length - 1; i >= 0; i--) {
@@ -539,69 +536,52 @@ function updateGemWarp() {
     if (gemGhosts[i].life <= 0) gemGhosts.splice(i, 1);
   }
   if (gemWarpTimer <= 0) {
-    // settle: keep a couple fading ghosts
     gemStreaks = [];
     player.gemWarpDist = 0;
+    // keep at most 1 faint trail ghost on land
+    while (gemGhosts.length > 1) gemGhosts.shift();
   }
 }
 
-/** Screen-space cyan tint + vertical speed streaks (whole viewport) */
+/** Soft screen streaks + subtle tint (no full-screen wash) */
 function drawGemWarpScreenFX() {
   if (gemWarpTimer <= 0 && gemGhosts.length === 0) return;
   const peak = gemWarpTimer > 0
-    ? sin(constrain(gemWarpPhase, 0, 1) * PI) // envelope
+    ? sin(constrain(gemWarpPhase, 0, 1) * PI)
     : 0;
-  const tintA = gemWarpTimer > 0 ? 70 + peak * 110 : 0;
 
-  // OBVIOUS full-screen cyan wash (whole viewport)
-  if (tintA > 0) {
+  // very soft localized cyan — avoid full-screen brightness
+  if (gemWarpTimer > 0 && peak > 0.05) {
     noStroke();
-    fill(20, 180, 255, tintA);
-    rect(0, 0, VW, VH);
-    // brighter center band
-    fill(80, 240, 255, tintA * 0.45);
+    fill(40, 180, 255, 12 + peak * 22);
     rect(WALL, 0, VW - WALL * 2, VH);
-    // hard cyan edge bars (viewport glow)
-    const edgeA = 90 + peak * 140;
-    fill(100, 255, 255, edgeA * 0.7);
-    rect(0, 0, 5, VH);
-    rect(VW - 5, 0, 5, VH);
-    rect(0, 0, VW, 4);
-    rect(0, VH - 4, VW, 4);
-    // inner gap outline pulses
-    noFill();
-    stroke(180, 255, 255, 60 + peak * 120);
-    strokeWeight(2);
-    rect(WALL + 1, 1, VW - WALL * 2 - 2, VH - 2);
-    noStroke();
   }
 
-  // vertical speed streaks across the gap
+  // subtle thin vertical streaks in the gap
   if (gemWarpTimer > 0) {
+    noStroke();
     for (let s of gemStreaks) {
-      let a;
-      if (s.bright > 0.78) { a = 220 + peak * 35; fill(200, 255, 255, a); }
-      else if (s.bright > 0.4) { a = 170 + peak * 50; fill(80, 240, 255, a); }
-      else { a = 120 + peak * 50; fill(40, 160, 220, a); }
+      const a = s.bright > 0.6
+        ? 70 + peak * 50
+        : 35 + peak * 35;
+      fill(80, 230, 255, a);
       rect(s.x, s.y, s.thick, s.len);
-      // short spark dashes
-      if (s.bright > 0.7 && (frameCount + int(s.x)) % 3 === 0) {
-        fill(255, 255, 255, 180 + peak * 60);
-        rect(s.x - 1, s.y + s.len * 0.3, 5, 2);
-      }
     }
   }
 }
 
-/** World-space screen afterimages drawn with player (inside cam translate) */
+/** World-space dash-like afterimages (2–3 clones, like DASH) */
 function drawGemWarpGhosts() {
   if (!gemGhosts.length || !player) return;
-  for (let i = 0; i < gemGhosts.length; i++) {
+  // draw oldest → newest, spaced samples only
+  const n = gemGhosts.length;
+  for (let i = 0; i < n; i++) {
     const g = gemGhosts[i];
     const name = player.spriteName(g.side, g.jumpFrom, g.anim, g.slashFrame, g.air, false, g.spinFrame);
     const sp = sprites[name] || sprites.cat_wall_run_01;
     if (!sp) continue;
-    const alpha = map(g.life, 0, 18, 20, 160);
+    // softer alphas than old dense wash
+    const alpha = map(i, 0, max(1, n - 1), 35, 110) * map(g.life, 0, 14, 0.35, 1);
     push();
     tint(60, 230, 255, alpha);
     player.drawSpriteAt(sp, g.x, g.y, g.side, g.air);
@@ -631,7 +611,7 @@ class Player {
     this.h = 13;
     this.trail = []; // afterimage samples {x,y,side,jumpFrom,anim,name hint}
     this.hitThisSlash = false;
-    this.spinFrame = 0;       // 0..7 jump spin slash pose
+    this.spinFrame = 0;       // even ids 00/02/04/06 (4 midair poses)
     this.gemWarpDist = 0;
     this.gemWarpFromY = 0;
     this.slashTrail = [];     // cyan path dots during spin jump
@@ -693,12 +673,12 @@ class Player {
       this.y -= sin(t * PI) * 4.5;
 
       this.slashFrame = floor(t * 3);
-      // full midair spin: 8 NEAREST frames across the arc
-      this.spinFrame = constrain(floor(t * 8), 0, 7);
-      // cyan slash path trail
-      if (this.jumpT % 2 === 0) {
-        this.slashTrail.push({ x: this.x, y: this.y, life: 12 });
-        if (this.slashTrail.length > 10) this.slashTrail.shift();
+      // cleaner spin: only 4 midair poses — spin 00/02/04/06
+      this.spinFrame = constrain(floor(t * 4), 0, 3) * 2;
+      // soft white/cyan dash afterimages (2–3), not dense path dots
+      if (this.jumpT % 3 === 0) {
+        this.slashTrail.push({ x: this.x, y: this.y, life: 10, spinFrame: this.spinFrame });
+        if (this.slashTrail.length > 3) this.slashTrail.shift();
       }
       for (let i = this.slashTrail.length - 1; i >= 0; i--) {
         this.slashTrail[i].life--;
@@ -838,13 +818,21 @@ class Player {
     // afterimages behind (trail is lower / older climb positions)
     if (this.boostTimer > 0) this.drawAfterimages();
 
-    // cyan path trail under spin slash
+    // soft dash-like spin afterimages (behind cat)
     if (this.side === 'air' && this.slashTrail.length) {
-      noStroke();
       for (let i = 0; i < this.slashTrail.length; i++) {
         const p = this.slashTrail[i];
-        fill(60, 230, 255, map(p.life, 0, 12, 40, 220));
-        ellipse(p.x, p.y, 5, 5);
+        const sf = (p.spinFrame == null) ? this.spinFrame : p.spinFrame;
+        const nm = this.spriteName('air', this.jumpFrom, this.anim, this.slashFrame, true, false, sf);
+        const tsp = sprites[nm];
+        if (!tsp) continue;
+        const alpha = map(i, 0, max(1, this.slashTrail.length - 1), 40, 100)
+          * map(p.life, 0, 10, 0.4, 1);
+        push();
+        tint(180, 240, 255, alpha);
+        this.drawSpriteAt(tsp, p.x, p.y, 'air', true);
+        pop();
+        noTint();
       }
     }
 
@@ -858,7 +846,7 @@ class Player {
       rect(this.x - 4, this.y - 6, 8, 13);
     }
 
-    // Jump spin slash VFX (arc + burst mid-spin)
+    // Jump spin slash VFX — single sweeping arc only
     if (this.side === 'air' && this.slashing && !this.dead) {
       this.drawSpinSlashFX();
     }
@@ -877,27 +865,27 @@ class Player {
       noStroke();
     }
 
-    // GEM warp: local upward streak companions while warping
+    // GEM warp: soft local companion streaks (dash-like, not wash)
     if (gemWarpTimer > 0) {
       strokeWeight(1);
-      for (let i = 0; i < 4; i++) {
-        stroke(80, 255, 255, 110 - i * 22);
-        const ox = (i - 1.5) * 3;
-        line(this.x + ox, this.y + 4 + i * 2, this.x + ox, this.y + 18 + i * 5);
+      for (let i = 0; i < 3; i++) {
+        stroke(80, 255, 255, 55 - i * 14);
+        const ox = (i - 1) * 3;
+        line(this.x + ox, this.y + 6 + i * 2, this.x + ox, this.y + 14 + i * 3);
       }
       noStroke();
-      // yellow warp arrow
-      if (gemWarpPhase > 0.05 && gemWarpPhase < 0.85) {
+      // soft yellow hop marker (low opacity)
+      if (gemWarpPhase > 0.08 && gemWarpPhase < 0.8) {
         noStroke();
-        fill(255, 220, 80, 220);
-        triangle(this.x, this.y - 16, this.x - 4, this.y - 10, this.x + 4, this.y - 10);
+        fill(255, 220, 80, 140);
+        triangle(this.x, this.y - 14, this.x - 3, this.y - 9, this.x + 3, this.y - 9);
       }
     }
   }
 
   drawSpinSlashFX() {
     const t = constrain(this.jumpT / 22, 0, 1);
-    // arc frames 1..4 across mid jump
+    // one arc frame per midair spin pose (readable single sweep — not 米字)
     const ai = constrain(1 + floor(t * 4), 1, 4);
     const arc = sprites[`spin_slash_arc_0${ai}`];
     imageMode(CENTER);
@@ -906,41 +894,22 @@ class Player {
       translate(this.x, this.y);
       // mirror arc when jumping right→left
       if (this.jumpFrom === 'right') scale(-1, 1);
-      const pulse = 0.85 + sin(t * PI) * 0.25;
-      image(arc, 0, 0, 40 * pulse, 40 * pulse);
+      const pulse = 0.95 + sin(t * PI) * 0.12;
+      image(arc, 0, 0, 36 * pulse, 36 * pulse);
       pop();
     }
-    // white slash burst at peak spin (frames ~2-5)
-    if (t > 0.25 && t < 0.72) {
-      const burst = sprites.spin_slash_burst || sprites.slash_01;
-      if (burst) {
+    // soft white dash streak behind (not radial spokes / burst)
+    if (t > 0.18 && t < 0.78) {
+      const dash = sprites.spin_slash_burst;
+      if (dash) {
         push();
         translate(this.x, this.y);
-        rotate(t * TWO_PI);
-        const a = map(sin(t * PI), 0, 1, 120, 255);
+        // orient dash opposite travel (trail behind)
+        const goingRight = this.jumpFrom === 'left';
+        if (!goingRight) scale(-1, 1);
+        const a = map(sin(t * PI), 0, 1, 80, 180);
         tint(255, 255, 255, a);
-        image(burst, 0, 0, 30, 30);
-        pop();
-        noTint();
-      }
-      // radial motion ticks
-      stroke(40, 100, 180, 100);
-      strokeWeight(1);
-      for (let i = 0; i < 6; i++) {
-        const ang = (i / 6) * TWO_PI + t * 4;
-        line(this.x + cos(ang) * 6, this.y + sin(ang) * 6,
-             this.x + cos(ang) * 14, this.y + sin(ang) * 14);
-      }
-      noStroke();
-    }
-    // also flash classic slash sprites briefly
-    if (t > 0.35 && t < 0.55) {
-      const s1 = sprites.slash_02 || sprites.slash_01;
-      if (s1) {
-        push();
-        tint(255, 255, 255, 180);
-        imageMode(CENTER);
-        image(s1, this.x, this.y, 18, 18);
+        image(dash, goingRight ? -10 : -10, 0, 18, 12);
         pop();
         noTint();
       }
