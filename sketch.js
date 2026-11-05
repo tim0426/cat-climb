@@ -10,6 +10,7 @@
  * 3) Pointed triangular spikes
  * 4) Shield: 8-frame aura + bubble + hit_flash (demo/shield_pack)
  * 5) Every 3 slash HITS → climb boost + cyan trailing afterimages
+ * 6) Player cat sprites scaled ~18px body (NEAREST) to match dragon/bat (~14-16px)
  */
 
 const VW = 180;
@@ -458,8 +459,8 @@ class Player {
     this.boostTimer = 0;
     this.dead = false;
     this.climbSpeed = 1.6;
-    this.w = 14;
-    this.h = 20;
+    this.w = 9;
+    this.h = 13;
     this.trail = []; // afterimage samples {x,y,side,jumpFrom,anim,name hint}
     this.hitThisSlash = false;
   }
@@ -599,8 +600,8 @@ class Player {
   drawShieldFX() {
     if (!this.hasShield || this.dead) return;
     // center on body: wall-run sprites are flush; offset into gap
-    const cx = this.side === 'left' ? GAP_L + 14
-      : this.side === 'right' ? GAP_R - 14
+    const cx = this.side === 'left' ? GAP_L + 9
+      : this.side === 'right' ? GAP_R - 9
       : this.x;
     const cy = this.y;
     // demo/shield_pack aura_01..08 loop + bubble (+ hit_flash on break)
@@ -611,7 +612,7 @@ class Player {
       push();
       translate(cx, cy);
       const pulse = 1 + sin(frameCount * 0.15) * 0.08;
-      image(aura, 0, 0, 36 * pulse, 36 * pulse);
+      image(aura, 0, 0, 23 * pulse, 23 * pulse);
       pop();
     }
     const bubble = sprites.shield_bubble;
@@ -620,14 +621,14 @@ class Player {
       translate(cx, cy);
       rotate(frameCount * 0.05);
       const bp = 1 + sin(frameCount * 0.12 + 1) * 0.05;
-      image(bubble, 0, 0, 28 * bp, 28 * bp);
+      image(bubble, 0, 0, 18 * bp, 18 * bp);
       pop();
     }
     if (hitFlashTimer > 0 && sprites.shield_hit_flash) {
       const a = map(hitFlashTimer, 0, 12, 0, 255);
       push();
       tint(255, 255, 255, a);
-      image(sprites.shield_hit_flash, cx, cy, 40, 40);
+      image(sprites.shield_hit_flash, cx, cy, 26, 26);
       pop();
       noTint();
     }
@@ -647,14 +648,14 @@ class Player {
       this.drawShieldFX();
     } else {
       fill(240, 180, 80);
-      rect(this.x - 6, this.y - 10, 12, 20);
+      rect(this.x - 4, this.y - 6, 8, 13);
     }
 
     if (this.boostTimer > 0) {
       // subtle upward streak lines (殘影 companion)
       strokeWeight(1);
-      const cx = this.side === 'left' ? GAP_L + 10
-        : this.side === 'right' ? GAP_R - 10
+      const cx = this.side === 'left' ? GAP_L + 6
+        : this.side === 'right' ? GAP_R - 6
         : this.x;
       for (let i = 0; i < 3; i++) {
         stroke(80, 255, 255, 90 - i * 25);
@@ -665,8 +666,8 @@ class Player {
     }
   }
 
-  hitbox() { return { x: this.x - 7, y: this.y - 12, w: 14, h: 22 }; }
-  slashbox() { return { x: this.x - 14, y: this.y - 14, w: 28, h: 26 }; }
+  hitbox() { return { x: this.x - 5, y: this.y - 8, w: 9, h: 14 }; }
+  slashbox() { return { x: this.x - 9, y: this.y - 9, w: 18, h: 17 }; }
 }
 
 /* ========== Flying dragon / bat ========== */
