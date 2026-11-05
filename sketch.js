@@ -69,6 +69,9 @@ function preload() {
   });
   ['slash_01','slash_02','land_dust_01','hit_puff'].forEach(n => load('effects', n));
   ['height_flag','medal'].forEach(n => load('ui', n));
+  ['shield_aura_01','shield_aura_02','shield_aura_03','shield_aura_04'].forEach(n => load('effects', n));
+  ['cannon_left','cannon_right'].forEach(n => load('obstacles', n));
+  ['heart','gem','clock'].forEach(n => load('items', n));
 }
 
 function setup() {
@@ -178,10 +181,22 @@ function updatePlay() {
 }
 
 function handleCollision(e) {
-  if (e.kind === 'shield') {
-    player.hasShield = true;
+  if (e.kind === 'pickup') {
     e.dead = true;
-    flash('SHIELD!', 40);
+    if (e.type === 'shield') {
+      player.hasShield = true;
+      flash('SHIELD!', 40);
+    } else if (e.type === 'heart') {
+      // 短暫無敵當「回血」 ethereal
+      player.invuln = max(player.invuln, 60);
+      flash('SAFE!', 35);
+    } else if (e.type === 'gem') {
+      player.y -= 80; // 瞬移向上一小段
+      flash('GEM UP!', 35);
+    } else if (e.type === 'clock') {
+      player.boostTimer = max(player.boostTimer, 70);
+      flash('SLOW BOOST', 35);
+    }
     return;
   }
   if (e.kind === 'enemy') {
@@ -244,13 +259,16 @@ function registerCombo(type) {
 }
 
 function spawnContent(worldY) {
-  // 隨機敵人／障礙／盾
   const r = random();
-  if (r < 0.12) {
-    // shield in gap
-    entities.push(new Pickup(VW / 2 + random(-20, 20), worldY, 'shield'));
+  if (r < 0.10) {
+    const kinds = ['shield', 'shield', 'heart', 'gem', 'clock'];
+    entities.push(new Pickup(VW / 2 + random(-20, 20), worldY, random(kinds)));
+  } else if (r < 0.22) {
+    // 炮台貼牆，會射炮彈
+    const side = random() < 0.5 ? 'left' : 'right';
+    const x = side === 'left' ? GAP_L + 6 : GAP_R - 6;
+    entities.push(new Cannon(x, worldY, side));
   } else if (r < 0.55) {
-    // enemy on a wall or mid
     const type = random(ENEMY_POOL[theme]);
     const side = random(['left', 'right', 'mid']);
     let x;
@@ -259,7 +277,6 @@ function spawnContent(worldY) {
     else x = VW / 2 + random(-25, 25);
     entities.push(new Enemy(x, worldY, type, side));
   } else {
-    // obstacle on wall
     const type = random(OBSTACLE_POOL[theme]);
     const side = random() < 0.5 ? 'left' : 'right';
     const x = side === 'left' ? GAP_L + 8 : GAP_R - 8;
@@ -360,7 +377,7 @@ function drawHUD() {
 
   // shield icon
   if (player && player.hasShield && sprites.shield) {
-    image(sprites.shield, VW / 2 - 6, 4, 12, 12);
+    image(sprites.shield, VW / 2 - 8, 2, 16, 16);
   }
 
   if (flashTimer > 0) {
@@ -422,7 +439,7 @@ function flash(msg, t) {
 class Player {
   constructor() {
     this.side = 'left'; // left | right | air
-    this.x = GAP_L + 10;
+    this.x = GAP_L + 2; // 腳貼左牆
     this.y = 0;
     this.vy = 0;
     this.jumpT = 0;
@@ -472,7 +489,7 @@ class Player {
 
     if (this.climbing) {
       this.y -= this.climbSpeed;
-      this.x = this.side === 'left' ? GAP_L + 10 : GAP_R - 10;
+      this.x = this.side === 'left' ? GAP_L + 2 : GAP_R - 2;
       this.anim += 0.25;
       this.slashing = false;
     } else {
@@ -480,8 +497,8 @@ class Player {
       this.jumpT++;
       const dur = 18;
       const t = constrain(this.jumpT / dur, 0, 1);
-      const fromX = this.jumpFrom === 'left' ? GAP_L + 10 : GAP_R - 10;
-      const toX = this.jumpFrom === 'left' ? GAP_R - 10 : GAP_L + 10;
+      const fromX = this.jumpFrom === 'left' ? GAP_L + 2 : GAP_R - 2;
+      const toX = this.jumpFrom === 'left' ? GAP_R - 2 : GAP_L + 2;
       this.x = lerp(fromX, toX, t);
       this.y -= this.climbSpeed * 0.85; // 跳緊都繼續向上
       // 小弧線
@@ -490,7 +507,7 @@ class Player {
       this.slashFrame = floor(t * 3);
       if (t >= 1) {
         this.side = this.jumpFrom === 'left' ? 'right' : 'left';
-        this.x = this.side === 'left' ? GAP_L + 10 : GAP_R - 10;
+        this.x = this.side === 'left' ? GAP_L + 2 : GAP_R - 2;
         this.slashing = false;
         // land dust
         particles.push(new Particle(this.x, this.y + 8, color(220, 220, 230)));
@@ -502,8 +519,6 @@ class Player {
     if (this.invuln > 0 && frameCount % 4 < 2) return;
 
     let name;
-    const right = this.side === 'right' || (this.side === 'air' && this.jumpFrom === 'left');
-    // 空中時：從左跳去右 → 用 rightwall 圖（面向左？）其實 jump 用對應方向
     const useRightWall = (this.side === 'right') || (this.side === 'air' && this.jumpFrom === 'left');
 
     if (this.dead) {
@@ -525,16 +540,40 @@ class Player {
     }
 
     const sp = sprites[name] || sprites['ninja_wall_run_01'];
+    // 腳貼牆：左牆 sprite 左緣貼 GAP_L；右牆右緣貼 GAP_R
     if (sp) {
-      imageMode(CENTER);
-      image(sp, this.x, this.y, sp.width, sp.height);
       imageMode(CORNER);
+      let dx, dy;
+      dy = this.y - sp.height / 2;
+      if (this.side === 'left' || (this.side === 'air' && this.jumpFrom === 'right')) {
+        dx = this.x; // x = GAP_L+2，等同腳位
+      } else if (this.side === 'right' || (this.side === 'air' && this.jumpFrom === 'left')) {
+        dx = this.x - sp.width;
+      } else {
+        dx = this.x - sp.width / 2;
+      }
+      // 空中用當前 x 居中偏牆
+      if (this.side === 'air') {
+        dx = this.x - sp.width / 2;
+        dy = this.y - sp.height / 2;
+      }
+      image(sp, dx, dy, sp.width, sp.height);
+
+      // 藍色漩渦護盾 aura（跟你張參考圖）
+      if (this.hasShield && !this.dead) {
+        const ai = 1 + (floor(frameCount / 4) % 4);
+        const aura = sprites[`shield_aura_0${ai}`];
+        if (aura) {
+          imageMode(CENTER);
+          image(aura, this.x + (this.side === 'left' ? 10 : this.side === 'right' ? -10 : 0), this.y, 28, 28);
+          imageMode(CORNER);
+        }
+      }
     } else {
       fill(50, 100, 200);
       rect(this.x - 6, this.y - 10, 12, 20);
     }
 
-    // boost glow
     if (this.boostTimer > 0) {
       noFill();
       stroke(255, 220, 80, 180);
@@ -621,22 +660,60 @@ class Obstacle {
 class Pickup {
   constructor(x, y, type) {
     this.x = x; this.y = y; this.type = type;
-    this.kind = 'shield';
+    this.kind = 'pickup';
     this.dead = false;
     this.w = 12; this.h = 12;
     this.bob = random(TWO_PI);
   }
   update() { this.bob += 0.1; }
   draw() {
-    const sp = sprites.shield;
+    const sp = sprites[this.type] || sprites.shield;
     if (sp) {
       imageMode(CENTER);
-      image(sp, this.x, this.y + sin(this.bob) * 2, 12, 12);
+      const s = this.type === 'shield' ? 16 : 12;
+      image(sp, this.x, this.y + sin(this.bob) * 2, s, s);
       imageMode(CORNER);
     }
   }
   collides(p) {
     return aabb(p.hitbox(), { x: this.x - 6, y: this.y - 6, w: 12, h: 12 });
+  }
+}
+
+class Cannon {
+  constructor(x, y, side) {
+    this.x = x; this.y = y; this.side = side;
+    this.kind = 'obstacle'; // 撞炮身會受傷
+    this.type = 'cannon';
+    this.dead = false;
+    this.w = 14; this.h = 12;
+    this.fireCd = floor(random(40, 90));
+  }
+  update() {
+    this.fireCd--;
+    if (this.fireCd <= 0) {
+      this.fireCd = floor(random(70, 120));
+      const vx = this.side === 'left' ? 1.4 : -1.4;
+      entities.push(new Obstacle(this.x + (this.side === 'left' ? 8 : -8), this.y, 'cannonball', this.side));
+      // 覆蓋速度
+      const ball = entities[entities.length - 1];
+      ball.vx = vx;
+      ball.w = 10; ball.h = 10;
+    }
+  }
+  draw() {
+    const sp = sprites[this.side === 'left' ? 'cannon_left' : 'cannon_right'];
+    if (sp) {
+      imageMode(CENTER);
+      image(sp, this.x, this.y, sp.width, sp.height);
+      imageMode(CORNER);
+    } else {
+      fill(80); rect(this.x - 6, this.y - 5, 12, 10);
+    }
+  }
+  collides(p) {
+    const box = p.slashing ? p.slashbox() : p.hitbox();
+    return aabb(box, { x: this.x - this.w/2, y: this.y - this.h/2, w: this.w, h: this.h });
   }
 }
 
