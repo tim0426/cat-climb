@@ -1034,18 +1034,41 @@ class Cannon {
     this.dead = false; this.w = 14; this.h = 12;
     this.fireCd = floor(random(40, 90));
     this.anim = 0;
+    this.muzzle = 0; // frames of flash+smoke (matches demo ~5 beats)
+  }
+  fire() {
+    this.anim = 5;
+    this.muzzle = 28; // ~0.45s so flash/smoke readable like demo GIF
+    const dir = this.side === 'left' ? 1 : -1;
+    const mx = this.x + dir * 10;
+    const ball = new Obstacle(this.x + dir * 8, this.y, 'cannonball', this.side);
+    ball.vx = dir * 1.5;
+    ball.w = 8; ball.h = 8;
+    entities.push(ball);
+    // sparks + smoke puffs (demo feel)
+    for (let i = 0; i < 6; i++) {
+      const spark = new Particle(mx + dir * random(0, 4), this.y + random(-3, 3), color(255, 180 + random(40), 40));
+      spark.vx = dir * random(0.6, 2.2);
+      spark.vy = random(-1.2, 0.6);
+      spark.life = floor(random(10, 18));
+      particles.push(spark);
+    }
+    for (let i = 0; i < 5; i++) {
+      const smoke = new Particle(mx + dir * random(0, 6), this.y + random(-4, 4), color(160, 155, 150));
+      smoke.vx = dir * random(0.2, 0.9);
+      smoke.vy = random(-0.8, -0.1);
+      smoke.life = floor(random(16, 28));
+      particles.push(smoke);
+    }
   }
   update() {
     this.fireCd--;
     if (this.fireCd <= 0) {
       this.fireCd = floor(random(70, 120));
-      this.anim = 5;
-      const ball = new Obstacle(this.x + (this.side === 'left' ? 8 : -8), this.y, 'cannonball', this.side);
-      ball.vx = this.side === 'left' ? 1.5 : -1.5;
-      ball.w = 8; ball.h = 8;
-      entities.push(ball);
+      this.fire();
     }
     if (this.anim > 0) this.anim--;
+    if (this.muzzle > 0) this.muzzle--;
   }
   draw() {
     const frame = this.anim > 0 ? min(5, 6 - this.anim) : 1;
@@ -1054,13 +1077,13 @@ class Cannon {
     imageMode(CENTER);
     if (sp) image(sp, this.x, this.y);
     else { fill(80); rect(this.x - 6, this.y - 5, 12, 10); }
-    // muzzle flash + smoke while recoiling (anim 5→1)
-    if (this.anim > 0) {
-      const mi = constrain(5 - this.anim, 0, 4);
+    // demo/cannon_muzzle_fx: flash → sparks → smoke (5 beats stretched over muzzle timer)
+    if (this.muzzle > 0) {
+      const mi = constrain(floor((1 - this.muzzle / 28) * 5), 0, 4);
       const mz = this.side === 'left' ? sprites[`muzzle_${mi}`] : sprites[`muzzle_r_${mi}`];
       if (mz) {
-        const mx = this.x + (this.side === 'left' ? 10 : -10);
-        image(mz, mx, this.y);
+        const mx = this.x + (this.side === 'left' ? 11 : -11);
+        image(mz, mx, this.y, 36, 30); // larger than source so it reads like the demo
       }
     }
     imageMode(CORNER);
