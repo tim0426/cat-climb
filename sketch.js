@@ -11,7 +11,8 @@
  * 4) Shield: 8-frame aura + bubble + hit_flash (demo/shield_pack)
  * 5) Every 3 slash HITS → climb boost + cyan trailing afterimages
  * 6) Player cat sprites scaled ~18px body (NEAREST) to match dragon/bat (~14-16px)
- * 7) GEM teleport: soft dash-like afterimages + subtle streaks (demo/gem_soft_dash_*) — not full-screen wash
+ * 7) Removed wall beetles/hornets (tiny, no reliable hit feel)
+ * 8) GEM teleport: soft dash-like afterimages + subtle streaks (demo/gem_soft_dash_*) — not full-screen wash
  * 8) Jump spin slash: START+4 midair (spin 00/02/04/06) + single sweeping arc (demo/spin_slash_cleaner_*) — not 米字 spokes
  */
 
@@ -75,7 +76,6 @@ function preload() {
   }
   for (let i = 0; i < 4; i++) load('enemies', `bat_${i}`);
   load('enemies', 'dragon');
-  ['beetle', 'hornet'].forEach(n => load('enemies', n));
 
   ['wall_spikes', 'wall_spikes_right', 'cannonball', 'arrow', 'shuriken']
     .forEach(n => load('obstacles', n));
@@ -291,14 +291,10 @@ function spawnContent(worldY) {
     const side = random() < 0.5 ? 'left' : 'right';
     const x = side === 'left' ? GAP_L + 8 : GAP_R - 8;
     entities.push(new Cannon(x, worldY, side));
-  } else if (r < 0.72) {
+  } else if (r < 0.78) {
     const kind = random() < 0.75 ? 'dragon' : 'bat';
     const x = GAP_L + 16 + random(VW - WALL * 2 - 32);
     entities.push(new Flyer(x, worldY, kind));
-  } else if (r < 0.88) {
-    const side = random(['left', 'right']);
-    const x = side === 'left' ? GAP_L + 14 : GAP_R - 14;
-    entities.push(new Enemy(x, worldY, random(['beetle', 'hornet']), side));
   } else {
     const side = random() < 0.5 ? 'left' : 'right';
     const x = side === 'left' ? GAP_L + 8 : GAP_R - 8;
@@ -967,26 +963,6 @@ class Flyer {
   }
 }
 
-class Enemy {
-  constructor(x, y, type, side) {
-    this.x = x; this.y = y; this.type = type; this.side = side;
-    this.kind = 'enemy'; this.dead = false;
-    this.w = 14; this.h = 14; this.bob = random(TWO_PI);
-  }
-  update() {
-    this.bob += 0.08;
-    if (this.side === 'mid') this.x += sin(this.bob) * 0.3;
-  }
-  draw() {
-    const sp = sprites[this.type];
-    if (sp) { imageMode(CENTER); image(sp, this.x, this.y + sin(this.bob) * 1.5); imageMode(CORNER); }
-    else { fill(200, 50, 50); rect(this.x - 6, this.y - 6, 12, 12); }
-  }
-  collides(p) {
-    const box = p.slashing ? p.slashbox() : p.hitbox();
-    return aabb(box, { x: this.x - this.w / 2, y: this.y - this.h / 2, w: this.w, h: this.h });
-  }
-}
 
 class Obstacle {
   constructor(x, y, type, side) {
