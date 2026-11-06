@@ -14,7 +14,8 @@
  * 7) Removed wall beetles/hornets (tiny, no reliable hit feel)
  * 8) Cannon: brighter ember ball + muzzle flash/smoke on fire
  * 9) GEM teleport: soft dash-like afterimages + subtle streaks (demo/gem_soft_dash_*) — not full-screen wash
- * 8) Jump spin slash: START+4 midair (spin 00/02/04/06) + single sweeping arc (demo/spin_slash_cleaner_*) — not 米字 spokes
+ * 10) Jump spin slash: START+4 midair (spin 00/02/04/06) + single sweeping arc (demo/spin_slash_cleaner_*) — not 米字 spokes
+ * 11) Wall hazards (cannon / spikes) keep min vertical gap so they don't cluster
  */
 
 const VW = 180;
@@ -24,6 +25,8 @@ let SCALE = 2;
 const WALL = 22;
 const GAP_L = WALL;
 const GAP_R = VW - WALL;
+/** Min world-Y gap between wall hazards (cannon + spikes) so they don't stack too tight */
+const MIN_WALL_HAZARD_GAP = 100;
 
 let sprites = {};
 let bgImg = null;
@@ -149,7 +152,7 @@ function resetRun(startPlay) {
   gemWarpPhase = 0;
   gemStreaks = [];
   gemGhosts = [];
-  for (let i = 0; i < 8; i++) spawnContent(80 + i * 70);
+  for (let i = 0; i < 7; i++) spawnContent(90 + i * 95);
   state = startPlay ? 'play' : 'title';
 }
 
@@ -191,9 +194,9 @@ function updatePlay() {
   camY = -player.y;
 
   spawnAcc += player.climbSpeed;
-  while (spawnAcc > 50) {
-    spawnAcc -= 50;
-    spawnContent(player.y - VH - random(20, 90));
+  while (spawnAcc > 65) {
+    spawnAcc -= 65;
+    spawnContent(player.y - VH - random(30, 110));
   }
 
   for (let i = entities.length - 1; i >= 0; i--) {
@@ -288,22 +291,49 @@ function registerSlashHit() {
   }
 }
 
+function wallHazardTooClose(worldY) {
+  for (const e of entities) {
+    if ((e.type === 'cannon' || e.type === 'wall_spikes') &&
+        Math.abs(e.y - worldY) < MIN_WALL_HAZARD_GAP) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function placeAwayFromWallHazards(worldY) {
+  let y = worldY;
+  for (let tries = 0; tries < 4; tries++) {
+    if (!wallHazardTooClose(y)) return y;
+    y -= MIN_WALL_HAZARD_GAP; // further up the climb (smaller y)
+  }
+  return null; // still crowded
+}
+
+function spawnFlyerAt(worldY) {
+  const kind = random() < 0.75 ? 'dragon' : 'bat';
+  const x = GAP_L + 16 + random(VW - WALL * 2 - 32);
+  entities.push(new Flyer(x, worldY, kind));
+}
+
 function spawnContent(worldY) {
   const r = random();
   if (r < 0.10) {
     entities.push(new Pickup(VW / 2 + random(-20, 20), worldY, random(['shield', 'shield', 'heart', 'gem', 'clock'])));
   } else if (r < 0.28) {
+    const y = placeAwayFromWallHazards(worldY);
+    if (y == null) { spawnFlyerAt(worldY); return; }
     const side = random() < 0.5 ? 'left' : 'right';
     const x = side === 'left' ? GAP_L + 8 : GAP_R - 8;
-    entities.push(new Cannon(x, worldY, side));
+    entities.push(new Cannon(x, y, side));
   } else if (r < 0.78) {
-    const kind = random() < 0.75 ? 'dragon' : 'bat';
-    const x = GAP_L + 16 + random(VW - WALL * 2 - 32);
-    entities.push(new Flyer(x, worldY, kind));
+    spawnFlyerAt(worldY);
   } else {
+    const y = placeAwayFromWallHazards(worldY);
+    if (y == null) { spawnFlyerAt(worldY); return; }
     const side = random() < 0.5 ? 'left' : 'right';
     const x = side === 'left' ? GAP_L + 8 : GAP_R - 8;
-    entities.push(new Obstacle(x, worldY, 'wall_spikes', side));
+    entities.push(new Obstacle(x, y, 'wall_spikes', side));
   }
 }
 
