@@ -12,7 +12,8 @@
  * 5) Every 3 slash HITS → climb boost + cyan trailing afterimages
  * 6) Player cat sprites scaled ~18px body (NEAREST) to match dragon/bat (~14-16px)
  * 7) Removed wall beetles/hornets (tiny, no reliable hit feel)
- * 8) GEM teleport: soft dash-like afterimages + subtle streaks (demo/gem_soft_dash_*) — not full-screen wash
+ * 8) Cannon: brighter ember ball + muzzle flash/smoke on fire
+ * 9) GEM teleport: soft dash-like afterimages + subtle streaks (demo/gem_soft_dash_*) — not full-screen wash
  * 8) Jump spin slash: START+4 midair (spin 00/02/04/06) + single sweeping arc (demo/spin_slash_cleaner_*) — not 米字 spokes
  */
 
@@ -104,6 +105,10 @@ function preload() {
   }
   load('effects', 'shield_bubble');
   load('effects', 'shield_hit_flash');
+  for (let i = 0; i < 5; i++) {
+    load('effects', `muzzle_${i}`);
+    load('effects', `muzzle_r_${i}`);
+  }
   ['height_flag', 'medal'].forEach(n => load('ui', n));
 
   bgImg = loadImage('assets/bg/bg_cave.png');
@@ -1046,8 +1051,19 @@ class Cannon {
     const frame = this.anim > 0 ? min(5, 6 - this.anim) : 1;
     const key = this.side === 'left' ? `cannon_l_${frame}` : `cannon_r_${frame}`;
     const sp = sprites[key] || sprites[this.side === 'left' ? 'cannon_left' : 'cannon_right'];
-    if (sp) { imageMode(CENTER); image(sp, this.x, this.y); imageMode(CORNER); }
+    imageMode(CENTER);
+    if (sp) image(sp, this.x, this.y);
     else { fill(80); rect(this.x - 6, this.y - 5, 12, 10); }
+    // muzzle flash + smoke while recoiling (anim 5→1)
+    if (this.anim > 0) {
+      const mi = constrain(5 - this.anim, 0, 4);
+      const mz = this.side === 'left' ? sprites[`muzzle_${mi}`] : sprites[`muzzle_r_${mi}`];
+      if (mz) {
+        const mx = this.x + (this.side === 'left' ? 10 : -10);
+        image(mz, mx, this.y);
+      }
+    }
+    imageMode(CORNER);
   }
   collides(p) {
     const box = p.slashing ? p.slashbox() : p.hitbox();
