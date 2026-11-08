@@ -16,7 +16,7 @@
  * 9) GEM teleport: soft dash-like afterimages + subtle streaks (demo/gem_soft_dash_*) — not full-screen wash
  * 10) Jump spin slash: START+4 midair (spin 00/02/04/06) + single sweeping arc (demo/spin_slash_cleaner_*) — not 米字 spokes
  * 11) Wall hazards (cannon / spikes) keep min vertical gap so they don't cluster
- * 12) Jump: shorter (19f) + ease-out + 3f buffer; light shake on jump / slash / hurt / death
+ * 12) Jump: shorter (19f) + ease-out + 3f buffer; soft phone haptic on jump / slash / hurt / death
  */
 
 const VW = 180;
@@ -32,11 +32,11 @@ const MIN_WALL_HAZARD_GAP = 100;
 const JUMP_DUR = 19;
 /** Frames before landing that still accept a jump press */
 const JUMP_BUFFER_FRAMES = 3;
-/** Screen shake amounts (world px before SCALE); light feedback */
-const SHAKE_JUMP = 1.1;
-const SHAKE_SLASH = 2.2;
-const SHAKE_HURT = 3.2;
-const SHAKE_DEATH = 5.5;
+/** Phone haptic (ms). Soft buzz — Android Chrome; iOS often no-ops */
+const HAPTIC_JUMP = 8;
+const HAPTIC_SLASH = 14;
+const HAPTIC_HURT = 22;
+const HAPTIC_DEATH = [28, 36, 22];
 
 let sprites = {};
 let bgImg = null;
@@ -203,7 +203,7 @@ function updatePlay() {
   player.update();
   if (jumpBuffer > 0) {
     jumpBuffer--;
-    if (player.climbing && player.jump()) addShake(SHAKE_JUMP);
+    if (player.climbing && player.jump()) haptic(HAPTIC_JUMP);
   }
   updateGemWarp();
   // Climbing UP (player.y ↓) → camY ↑ → walls/bg offsets scroll DOWN
@@ -254,7 +254,7 @@ function handleCollision(e) {
       e.dead = true;
       spawnHit(e.x, e.y);
       registerSlashHit();
-      addShake(SHAKE_SLASH);
+      haptic(HAPTIC_SLASH);
       return;
     }
     hurtPlayer();
@@ -271,7 +271,7 @@ function handleCollision(e) {
       e.dead = true;
       spawnHit(e.x, e.y);
       registerSlashHit();
-      addShake(SHAKE_SLASH);
+      haptic(HAPTIC_SLASH);
       return;
     }
     hurtPlayer();
@@ -286,13 +286,13 @@ function hurtPlayer() {
     player.invuln = 40;
     hitFlashTimer = 12;
     flash('SHIELD BREAK', 35);
-    addShake(SHAKE_HURT);
+    haptic(HAPTIC_HURT);
     return;
   }
   player.die();
   slashHitCombo = 0;
   state = 'dead';
-  addShake(SHAKE_DEATH);
+  haptic(HAPTIC_DEATH);
 }
 
 /** Every 3 jump-slashes that HIT an enemy/projectile → climb boost + afterimages */
@@ -363,12 +363,21 @@ function addShake(amount) {
   shake = max(shake, amount);
 }
 
+/** Soft device vibration (phone buzz). Safe no-op if unsupported. */
+function haptic(pattern) {
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate(pattern);
+    }
+  } catch (e) { /* ignore */ }
+}
+
 function doJump() {
   if (state === 'title' || state === 'dead') { resetRun(true); return; }
   if (state !== 'play') return;
   // buffer early presses so landing still feels snappy
   jumpBuffer = JUMP_BUFFER_FRAMES;
-  if (player.jump()) addShake(SHAKE_JUMP);
+  if (player.jump()) haptic(HAPTIC_JUMP);
 }
 
 function keyPressed() {
