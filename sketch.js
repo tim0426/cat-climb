@@ -16,6 +16,7 @@
  * 9) GEM teleport: soft dash-like afterimages + subtle streaks (demo/gem_soft_dash_*) — not full-screen wash
  * 10) Jump spin slash: START+4 midair (spin 00/02/04/06) + single sweeping arc (demo/spin_slash_cleaner_*) — not 米字 spokes
  * 11) Wall hazards (cannon / spikes) keep min vertical gap so they don't cluster
+ * 12) Jump: shorter (19f) + ease-out + 3f buffer; light shake on jump / slash / hurt / death
  */
 
 const VW = 180;
@@ -27,6 +28,15 @@ const GAP_L = WALL;
 const GAP_R = VW - WALL;
 /** Min world-Y gap between wall hazards (cannon + spikes) so they don't stack too tight */
 const MIN_WALL_HAZARD_GAP = 100;
+/** Jump feel: shorter + ease-out so leap starts immediately (less sluggish) */
+const JUMP_DUR = 19;
+/** Frames before landing that still accept a jump press */
+const JUMP_BUFFER_FRAMES = 3;
+/** Screen shake amounts (world px before SCALE); light feedback */
+const SHAKE_JUMP = 1.1;
+const SHAKE_SLASH = 2.2;
+const SHAKE_HURT = 3.2;
+const SHAKE_DEATH = 5.5;
 
 let sprites = {};
 let bgImg = null;
@@ -38,6 +48,7 @@ let camY = 0;
 let best = 0;
 let state = 'title';
 let shake = 0;
+let jumpBuffer = 0;
 let spawnAcc = 0;
 let slashHitCombo = 0; // 0..3 — any slash hit on enemy/obstacle
 let flashMsg = '';
@@ -152,6 +163,7 @@ function resetRun(startPlay) {
   gemWarpPhase = 0;
   gemStreaks = [];
   gemGhosts = [];
+  jumpBuffer = 0;
   for (let i = 0; i < 7; i++) spawnContent(90 + i * 95);
   state = startPlay ? 'play' : 'title';
 }
@@ -189,6 +201,10 @@ function draw() {
 
 function updatePlay() {
   player.update();
+  if (jumpBuffer > 0) {
+    jumpBuffer--;
+    if (player.climbing && player.jump()) addShake(SHAKE_JUMP);
+  }
   updateGemWarp();
   // Climbing UP (player.y ↓) → camY ↑ → walls/bg offsets scroll DOWN
   camY = -player.y;
@@ -238,7 +254,7 @@ function handleCollision(e) {
       e.dead = true;
       spawnHit(e.x, e.y);
       registerSlashHit();
-      shake = 2;
+      addShake(SHAKE_SLASH);
       return;
     }
     hurtPlayer();
@@ -255,6 +271,7 @@ function handleCollision(e) {
       e.dead = true;
       spawnHit(e.x, e.y);
       registerSlashHit();
+      addShake(SHAKE_SLASH);
       return;
     }
     hurtPlayer();
@@ -269,13 +286,13 @@ function hurtPlayer() {
     player.invuln = 40;
     hitFlashTimer = 12;
     flash('SHIELD BREAK', 35);
-    shake = 3;
+    addShake(SHAKE_HURT);
     return;
   }
   player.die();
   slashHitCombo = 0;
   state = 'dead';
-  shake = 5;
+  addShake(SHAKE_DEATH);
 }
 
 /** Every 3 jump-slashes that HIT an enemy/projectile → climb boost + afterimages */
@@ -342,9 +359,16 @@ function spawnHit(x, y) {
   particles.push(new Particle(x, y, color(255, 200, 80)));
 }
 
+function addShake(amount) {
+  shake = max(shake, amount);
+}
+
 function doJump() {
   if (state === 'title' || state === 'dead') { resetRun(true); return; }
-  if (state === 'play') player.jump();
+  if (state !== 'play') return;
+  // buffer early presses so landing still feels snappy
+  jumpBuffer = JUMP_BUFFER_FRAMES;
+  if (player.jump()) addShake(SHAKE_JUMP);
 }
 
 function keyPressed() {
@@ -519,7 +543,7 @@ function startGemWarp(distance) {
   for (let i = 0; i < 6; i++) {
     particles.push(new Particle(player.x, player.y, color(80, 255, 255)));
   }
-  shake = max(shake, 1.2);
+  addShake(1.2);
 }
 
 function updateGemWarp() {
@@ -655,7 +679,7 @@ class Player {
   }
 
   jump() {
-    if (this.dead || !this.climbing) return;
+    if (this.dead || !this.climbing) return false;
     this.jumpFrom = this.side;
     this.side = 'air';
     this.jumpT = 0;
@@ -664,6 +688,8 @@ class Player {
     this.spinFrame = 0;
     this.hitThisSlash = false;
     this.slashTrail = [];
+    jumpBuffer = 0;
+    return true;
   }
 
   die() {
@@ -694,9 +720,10 @@ class Player {
       this.slashing = false;
     } else {
       this.jumpT++;
-      const dur = 22;
+      const dur = JUMP_DUR;
       const t = constrain(this.jumpT / dur, 0, 1);
-      const te = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2;
+      // ease-out quad: strong horizontal start → less "slow takeoff" feel
+      const te = 1 - (1 - t) * (1 - t);
       const fromX = this.jumpFrom === 'left' ? GAP_L : GAP_R;
       const toX = this.jumpFrom === 'left' ? GAP_R : GAP_L;
       this.x = lerp(fromX, toX, te);
