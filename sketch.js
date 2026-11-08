@@ -17,6 +17,7 @@
  * 10) Jump spin slash: START+4 midair (spin 00/02/04/06) + single sweeping arc (demo/spin_slash_cleaner_*) — not 米字 spokes
  * 11) Wall hazards (cannon / spikes) keep min vertical gap so they don't cluster
  * 12) Jump: shorter (19f) + ease-out + 3f buffer; soft phone haptic on jump / slash / hurt / death
+ * 13) Global TOP 10 on death screen (Apps Script HTTPS leaderboard, all players)
  */
 
 const VW = 180;
@@ -37,6 +38,8 @@ const HAPTIC_JUMP = 8;
 const HAPTIC_SLASH = 14;
 const HAPTIC_HURT = 22;
 const HAPTIC_DEATH = [28, 36, 22];
+/** Global top-10 (all players) via Google Apps Script HTTPS */
+const LEADERBOARD_URL = 'https://script.google.com/macros/s/AKfycbzFweiMOySCx1Ts13lFnNWJ4Tsv1ufBllnycFlzvn5ezI5VTg_-ewhuJhcuWoJdyk2GpA/exec';
 
 let sprites = {};
 let bgImg = null;
@@ -59,6 +62,10 @@ let gemWarpTimer = 0;      // frames remaining of GEM scene-wide warp
 let gemWarpPhase = 0;      // 0..1 progress
 let gemStreaks = [];       // screen-space speed streaks regenerated each warp
 let gemGhosts = [];        // world-space afterimage samples during warp
+let leaderboard = [];      // [{name, score}] global top 10
+let leaderboardStatus = 'idle'; // idle|loading|ok|error
+let playerName = '';
+let lastRunDist = 0;
 
 function preload() {
   const load = (folder, name) => {
@@ -139,7 +146,9 @@ function setup() {
   pixelDensity(1);
   textFont('monospace');
   best = int(getItem('ninjump_cat_best') || 0);
+  playerName = ensurePlayerName();
   resetRun(false);
+  fetchLeaderboard();
 }
 
 function windowResized() {
@@ -293,6 +302,8 @@ function hurtPlayer() {
   slashHitCombo = 0;
   state = 'dead';
   haptic(HAPTIC_DEATH);
+  lastRunDist = floor(max(0, -player.y) / 10);
+  submitLeaderboardScore(lastRunDist);
 }
 
 /** Every 3 jump-slashes that HIT an enemy/projectile → climb boost + afterimages */
@@ -507,21 +518,128 @@ function drawTitle() {
   text('按空白鍵開始', VW / 2, VH / 2 + 68);
 }
 
+function ensurePlayerName() {
+  let n = getItem('ninjump_cat_name');
+  if (n && String(n).length >= 2) return String(n).slice(0, 16);
+  const id = String(floor(random(1000, 9999)));
+  n = 'Cat' + id;
+  storeItem('ninjump_cat_name', n);
+  return n;
+}
+
+function leaderboardJsonp(query, onOk, onErr) {
+  const cb = '_lb' + Date.now() + '_' + floor(random(1e6));
+  let done = false;
+  const finish = (fn, arg) => {
+    if (done) return;
+    done = true;
+    try { delete window[cb]; } catch (e) {}
+    if (script && script.parentNode) script.parentNode.removeChild(script);
+    clearTimeout(timer);
+    fn && fn(arg);
+  };
+  window[cb] = (data) => finish(onOk, data);
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = LEADERBOARD_URL + '?' + query + '&callback=' + cb + '&_=' + Date.now();
+  script.onerror = () => finish(onErr);
+  const timer = setTimeout(() => finish(onErr), 10000);
+  document.head.appendChild(script);
+}
+
+function applyLeaderboardData(data) {
+  if (data && data.ok && Array.isArray(data.top)) {
+    leaderboard = data.top.slice(0, 10);
+    leaderboardStatus = 'ok';
+    return true;
+  }
+  leaderboardStatus = 'error';
+  return false;
+}
+
+function fetchLeaderboard() {
+  leaderboardStatus = 'loading';
+  leaderboardJsonp('action=list', (data) => {
+    applyLeaderboardData(data);
+  }, () => { leaderboardStatus = 'error'; });
+}
+
+function submitLeaderboardScore(score) {
+  score = int(score) || 0;
+  if (score <= 0) {
+    fetchLeaderboard();
+    return;
+  }
+  leaderboardStatus = 'loading';
+  const q = 'action=add'
+    + '&name=' + encodeURIComponent(playerName || ensurePlayerName())
+    + '&score=' + score;
+  leaderboardJsonp(q, (data) => {
+    if (!applyLeaderboardData(data)) fetchLeaderboard();
+  }, () => {
+    leaderboardStatus = 'error';
+    fetchLeaderboard();
+  });
+}
+
 function drawDead() {
-  fill(0, 160);
+  fill(0, 175);
   rect(0, 0, VW, VH);
-  const dist = floor(max(0, -player.y) / 10);
+  const dist = lastRunDist || floor(max(0, -player.y) / 10);
+
   fill(255, 80, 80);
-  textAlign(CENTER, CENTER);
-  textSize(14);
-  text('FALL!', VW / 2, VH / 2 - 30);
+  textAlign(CENTER, TOP);
+  textSize(12);
+  text('FALL!', VW / 2, 18);
   fill(255);
-  textSize(10);
-  text(`${dist} m`, VW / 2, VH / 2);
-  fill(200);
+  textSize(9);
+  text(dist + ' m', VW / 2, 34);
+  fill(180);
+  textSize(6);
+  text('You ' + (playerName || 'Cat') + ' · Best ' + best + ' m', VW / 2, 48);
+
+  // Global TOP 10
+  fill(120, 255, 220);
   textSize(7);
-  text(`Best ${best} m`, VW / 2, VH / 2 + 16);
-  text('空白鍵再試', VW / 2, VH / 2 + 36);
+  text('GLOBAL TOP 10', VW / 2, 64);
+  textAlign(LEFT, TOP);
+  textSize(6);
+  let y = 76;
+  if (leaderboardStatus === 'loading' && leaderboard.length === 0) {
+    fill(200);
+    textAlign(CENTER, TOP);
+    text('loading…', VW / 2, y);
+  } else if (leaderboardStatus === 'error' && leaderboard.length === 0) {
+    fill(255, 160, 120);
+    textAlign(CENTER, TOP);
+    text('board offline', VW / 2, y);
+  } else {
+    const rows = leaderboard.slice(0, 10);
+    for (let i = 0; i < 10; i++) {
+      const row = rows[i];
+      const mine = row && row.name === playerName;
+      fill(mine ? color(255, 230, 80) : color(220));
+      const rank = (i + 1) + '.';
+      if (row) {
+        const nm = String(row.name).slice(0, 12);
+        const sc = int(row.score) + 'm';
+        text(rank, 18, y);
+        text(nm, 36, y);
+        textAlign(RIGHT, TOP);
+        text(sc, VW - 18, y);
+        textAlign(LEFT, TOP);
+      } else {
+        fill(90);
+        text(rank + ' —', 18, y);
+      }
+      y += 11;
+    }
+  }
+
+  fill(200);
+  textAlign(CENTER, BOTTOM);
+  textSize(7);
+  text('空白鍵再試', VW / 2, VH - 14);
 }
 
 function flash(msg, t) { flashMsg = msg; flashTimer = t; }
