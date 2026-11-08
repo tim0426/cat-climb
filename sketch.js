@@ -1,5 +1,5 @@
 /**
- * NinJump DX — Cat Climb (local playable)
+ * Cat Climb (p5.js web game)
  * 貓喺兩邊牆向上爬；空白鍵／點擊跳去對面（有弧度）。
  * 小飛龍由上飛落；炮台射炮彈。GitHub Pages: tim0426/ninjump-dx-pixel
  *
@@ -504,10 +504,10 @@ function drawTitle() {
   fill(255);
   textAlign(CENTER, CENTER);
   textSize(12);
-  text('Cat Climb DX', VW / 2, VH / 2 - 48);
+  text('Cat Climb', VW / 2, VH / 2 - 48);
   textSize(7);
   fill(255, 200, 80);
-  text('Ranger Cat · NinJump style', VW / 2, VH / 2 - 32);
+  text('壁面攀爬 · 斬擊衝刺', VW / 2, VH / 2 - 32);
   fill(220);
   text('空白鍵／點擊 → 跳去對面牆', VW / 2, VH / 2 - 2);
   text('空中可斬小飛龍同炮彈', VW / 2, VH / 2 + 10);
