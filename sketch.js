@@ -1,7 +1,7 @@
 /**
  * Cat Climb (p5.js web game)
  * 貓喺兩邊牆向上爬；空白鍵／點擊跳去對面（有弧度）。
- * 小飛龍由上飛落；炮台射炮彈。GitHub Pages: tim0426/ninjump-dx-pixel
+ * 小飛龍由上飛落；炮台射炮彈。GitHub Pages: tim0426/cat-climb
  *
  * Approved demo decisions:
  * 1) Wall-run: upright→scale(h=jump)→ROTATE_270→FLIP_TOP_BOTTOM (L);
